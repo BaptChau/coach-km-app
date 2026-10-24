@@ -23,8 +23,14 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Open http://localhost:8080 (or the `HTTP_PORT` you set). Register an account, then make it the
-president:
+Open http://localhost:8080 (or the `HTTP_PORT` you set). For development, fill it with dummy data
+(four accounts, password `password1`, see the root [README](../README.md#development-data)):
+
+```bash
+node scripts/seed-dev.mjs
+```
+
+Otherwise, register an account, then make it the president:
 
 ```bash
 docker compose exec api /app/admin set-role <email> president
