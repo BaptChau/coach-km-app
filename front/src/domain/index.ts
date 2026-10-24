@@ -1,2 +1,3 @@
-// Pure domain helpers (barème, km/EUR formatting, fr-FR locale) (issues #7, #11).
-export {}
+// Pure domain helpers: barème maths and fr-FR formatting (issue #7).
+export * from './bareme'
+export * from './format'
