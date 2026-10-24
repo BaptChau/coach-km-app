@@ -123,7 +123,7 @@ suggestions: Match, Entraînement, Tournoi, Réunion) · Distance (km, one way) 
 - Background `#F6F7F9`, surfaces white, rounded corners 12 px (cards) / 24 px (FAB), soft elevation (1–2).
 - **Dark theme** supported via `prefers-color-scheme`; check contrast in both themes.
 - Typography: Vuetify default (Roboto) or system font stack; body 16 px, money figures with `font-variant-numeric: tabular-nums`.
-- Icons: `@mdi/font` (`mdi-car`, `mdi-motorbike`, `mdi-moped`, `mdi-lightning-bolt` for electric, `mdi-lock` for locked, `mdi-cloud-sync` for pending).
+- Icons: Material Design Icons as SVG (`@mdi/js`, only the icons listed in `src/plugins/mdi-icons.ts`; the build fails on a missing one) (`mdi-car`, `mdi-motorbike`, `mdi-moped`, `mdi-lightning-bolt` for electric, `mdi-lock` for locked, `mdi-cloud-sync` for pending).
 - Spacing scale 4/8/16/24. Screen side padding 16 px.
 
 ## 7. Accessibility (WCAG 2.1 AA)

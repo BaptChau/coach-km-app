@@ -1,5 +1,9 @@
 // Vuetify SASS settings (compiled by vite-plugin-vuetify). See front/UX.md section 6.
 @use 'vuetify/settings' with (
   // `rounded="lg"` is the card radius from the brief: 12px.
-  $rounded: ('lg': 12px, 'xl': 24px)
+  $rounded: ('lg': 12px, 'xl': 24px),
+  // No Material colour classes (`bg-red-lighten-2`, `text-grey`...): the app only uses the
+  // theme colours (primary, error...), which the theme generates at runtime. Saves most of
+  // the render-blocking CSS (issue #12, UX.md section 8).
+  $color-pack: false
 );
