@@ -15,7 +15,7 @@ receipt (Cerfa 11580) issued by the club president.
 
 ```bash
 cp .env.example .env              # set JWT_SECRET: openssl rand -base64 48
-docker compose up -d --build
+docker compose up --build -d
 node scripts/seed-dev.mjs         # optional: dummy data (see below)
 ```
 

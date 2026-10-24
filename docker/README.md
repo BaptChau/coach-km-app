@@ -20,7 +20,7 @@ The Dockerfiles live in `docker/` so that nothing in `api/` changes.
 ```bash
 cp .env.example .env
 # set JWT_SECRET (e.g. openssl rand -base64 48) and, for receipts, ASSOCIATION_OBJECT
-docker compose up -d --build
+docker compose up --build -d
 ```
 
 Open http://localhost:8080 (or the `HTTP_PORT` you set). For development, fill it with dummy data
@@ -41,7 +41,7 @@ Useful commands:
 ```bash
 docker compose ps                 # both services should be "healthy"
 docker compose logs -f web api    # access log + API request log
-docker compose up -d --build      # deploy a new version (data is kept in the volume)
+docker compose up --build -d      # deploy a new version (data is kept in the volume)
 docker compose down               # stop (add -v to DELETE the database volume)
 ```
 
