@@ -1,0 +1,78 @@
+# coach-km-app: the Go API behind nginx, which serves the PWA and is the only
+# published entry point. Quick start: cp .env.example .env, set JWT_SECRET,
+# then `docker compose up -d --build`. See docker/README.md.
+
+name: coach-km
+
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: ../docker/api.Dockerfile
+    image: coach-km-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "3000"
+      DB_PATH: /data/coach-km.db
+    # No `ports:` on purpose: the API is reachable only through nginx.
+    expose:
+      - "3000"
+    volumes:
+      - api-data:/data
+    networks:
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  web:
+    build:
+      context: ./front
+      dockerfile: ../docker/web.Dockerfile
+      additional_contexts:
+        nginx: ./docker/nginx
+    image: coach-km-web:latest
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    networks:
+      - frontend
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    mem_limit: 128m
+    logging: *logging
+
+networks:
+  frontend:
+  # internal: containers on it have no route to the outside world.
+  backend:
+    internal: true
+
+volumes:
+  api-data:

@@ -1,0 +1,6 @@
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*_test.go
+**/.DS_Store
+.env*
