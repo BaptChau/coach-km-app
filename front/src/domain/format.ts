@@ -64,3 +64,34 @@ export function vehicleLabel(
   if (vehicle.electric) parts.push('électrique')
   return parts.join(' · ')
 }
+
+const decimalFormat = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 2 })
+
+/** A number without unit, fr-FR (`32,5`, `1 234`). */
+export function formatDecimal(value: number): string {
+  return decimalFormat.format(value)
+}
+
+/** Euros from the API (a number rounded to the cent) → integer cents for `formatEuros`. */
+export function toCents(euros: number): number {
+  return Math.round(euros * 100)
+}
+
+/**
+ * Parses a number typed by a French user: a comma or a dot as decimal separator, spaces
+ * ignored (`"1 234,5"` → 1234.5). Returns `null` when it is not a positive number.
+ */
+export function parseDecimal(text: string | number | null | undefined): number | null {
+  if (typeof text === 'number') return Number.isFinite(text) ? text : null
+  const clean = (text ?? '').replace(/[\s  ]/g, '').replace(',', '.')
+  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(clean)) return null
+  const n = Number(clean)
+  return Number.isFinite(n) ? n : null
+}
+
+/** Today as a local `YYYY-MM-DD` (no UTC shift). */
+export function todayIso(now: Date = new Date()): IsoDate {
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${m}-${d}`
+}

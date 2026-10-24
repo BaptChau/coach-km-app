@@ -5,6 +5,7 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isApiRequestError } from '@/api'
 import PublicShell from '@/components/layout/PublicShell.vue'
+import { describeError } from '@/domain'
 import { safeRedirect } from '@/router'
 import { useAuthStore } from '@/stores/auth'
 import { useTripsStore } from '@/stores/trips'
@@ -46,34 +47,13 @@ const rules: Record<Field, ((v: string) => true | string)[]> = {
   password: [(v) => v.length >= 8 || 'Au moins 8 caractères'],
 }
 
-/** Message under a field the API rejected with a 400. */
-const INVALID: Record<Field, string> = {
-  email: 'Cet e-mail ne semble pas valide',
-  registrationNumber: '13 chiffres, commençant par 5655006',
-  firstName: 'Indiquez votre prénom (100 caractères max.)',
-  lastName: 'Indiquez votre nom (100 caractères max.)',
-  password: 'Entre 8 et 72 caractères',
-}
-
-/** Maps an API `{ error }` message to the field it names. */
+/** Maps an API `{ error }` message (409 duplicate, 400 invalid) to the field it names. */
 function applyApiError(e: unknown): void {
-  if (!isApiRequestError(e)) {
-    error.value = 'Une erreur est survenue. Réessayez dans un instant.'
-    return
-  }
-  const msg = e.serverMessage ?? ''
-  if (e.isConflict && msg.startsWith('email')) fieldErrors.email = 'Cet e-mail est déjà inscrit'
-  else if (e.isConflict && msg.startsWith('registrationNumber'))
-    fieldErrors.registrationNumber = 'Ce numéro de licence est déjà inscrit'
-  else if (e.isValidation) {
-    const field = (Object.keys(form) as Field[]).find((f) => msg.startsWith(f))
-    if (field) fieldErrors[field] = INVALID[field]
-    else error.value = 'Vérifiez les informations saisies.'
-  } else if (e.isNetworkError) {
+  const { message, field } = describeError(e)
+  if (field && field in form) fieldErrors[field as Field] = message
+  else if (isApiRequestError(e) && e.isNetworkError)
     error.value = 'Inscription impossible : vérifiez votre réseau et réessayez.'
-  } else {
-    error.value = 'Une erreur est survenue. Réessayez dans un instant.'
-  }
+  else error.value = message
 }
 
 function clearError(field: Field): void {

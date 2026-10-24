@@ -45,8 +45,28 @@ export function testRouter() {
   return buildRouter(createMemoryHistory())
 }
 
+export interface MountInAppOptions {
+  /** Props of the mounted component. */
+  props?: Record<string, unknown>
+  /**
+   * Attach to `document.body`: needed for dialogs, which Vuetify teleports there. Query
+   * them with `new DOMWrapper(document.body)` and call `wrapper.unmount()` after the test.
+   */
+  attach?: boolean
+}
+
 /** Mounts a component inside a real `<v-app>` (layout components need one). */
-export function mountInApp(component: Component, pinia: Pinia, router: Router) {
-  const Host = defineComponent({ setup: () => () => h(VApp, () => h(component)) })
-  return mount(Host, { global: { plugins: [pinia, router, buildVuetify()] } })
+export function mountInApp(
+  component: Component,
+  pinia: Pinia,
+  router: Router,
+  options: MountInAppOptions = {},
+) {
+  const Host = defineComponent({
+    setup: () => () => h(VApp, () => h(component, options.props ?? {})),
+  })
+  return mount(Host, {
+    global: { plugins: [pinia, router, buildVuetify()] },
+    attachTo: options.attach ? document.body : undefined,
+  })
 }

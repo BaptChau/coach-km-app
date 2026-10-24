@@ -5,6 +5,7 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { isApiRequestError } from '@/api'
 import PublicShell from '@/components/layout/PublicShell.vue'
+import { errorMessage } from '@/domain'
 import { safeRedirect } from '@/router'
 import { useAuthStore } from '@/stores/auth'
 import { useTripsStore } from '@/stores/trips'
@@ -30,7 +31,7 @@ function messageFor(e: unknown): string {
     if (e.isNetworkError) return 'Connexion impossible : vérifiez votre réseau et réessayez.'
     if (e.isValidation) return 'Vérifiez votre e-mail et votre mot de passe.'
   }
-  return 'Une erreur est survenue. Réessayez dans un instant.'
+  return errorMessage(e)
 }
 
 async function submit(): Promise<void> {

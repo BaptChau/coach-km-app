@@ -11,7 +11,7 @@ export function mockApi(actual: Record<string, unknown>) {
     onUnauthorized: vi.fn(),
     saveBlob: vi.fn(),
     auth: { login: vi.fn(), register: vi.fn(), me: vi.fn(), updateMe: vi.fn() },
-    vehicles: { list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
+    vehicles: { list: vi.fn(async () => []), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
     trips: {
       listByYear: vi.fn(async () => []),
       get: vi.fn(),
@@ -20,10 +20,11 @@ export function mockApi(actual: Record<string, unknown>) {
       remove: vi.fn(),
       newClientId: vi.fn(() => 'client-1'),
     },
-    summary: { get: vi.fn() },
-    rates: { get: vi.fn() },
+    summary: { get: vi.fn(async () => null) },
+    // Offline by default: the rates store falls back to the bundled barème.
+    rates: { get: vi.fn(async () => Promise.reject(networkError())) },
     waivers: { list: vi.fn(async () => []), create: vi.fn(), remove: vi.fn(), receiptPdf: vi.fn() },
-    admin: { coaches: vi.fn(), receipts: vi.fn(), issueReceipt: vi.fn() },
+    admin: { coaches: vi.fn(async () => []), receipts: vi.fn(), issueReceipt: vi.fn() },
   }
 }
 
