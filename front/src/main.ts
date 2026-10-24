@@ -6,6 +6,7 @@ import App from '@/App.vue'
 import { enableMocks } from '@/mocks'
 import router from '@/router'
 import vuetify from '@/plugins/vuetify'
+import { setupPwa } from '@/plugins/pwa'
 import '@/styles/main.scss'
 
 const app = createApp(App)
@@ -21,3 +22,6 @@ app.use(vuetify)
 await enableMocks()
 
 app.mount('#app')
+
+// Service worker + update flow (issue #12), after the first render.
+void setupPwa(router)

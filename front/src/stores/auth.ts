@@ -3,6 +3,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { auth as authApi, onUnauthorized, setTokenProvider } from '@/api'
+import { clearApiCache } from '@/plugins/pwa-cache'
 import type { AuthResponse, Coach, LoginInput, ProfilePatch, RegisterInput } from '@/types'
 import { useAdminStore } from './admin'
 import { useSummaryStore } from './summary'
@@ -58,6 +59,8 @@ export const useAuthStore = defineStore(
       useSummaryStore().reset()
       useWaiversStore().reset()
       useAdminStore().reset()
+      // The service worker's cached API responses belong to this session (issue #12).
+      void clearApiCache()
     }
 
     async function fetchMe(): Promise<Coach> {
