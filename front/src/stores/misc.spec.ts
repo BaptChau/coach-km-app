@@ -1,7 +1,7 @@
 // ui, vehicles, waivers and admin stores.
 import { createPinia, setActivePinia } from 'pinia'
 import * as api from '@/api'
-import { serverTrip, tripInput, vehicle } from '@/test/api-mock'
+import { httpError, serverTrip, tripInput, vehicle } from '@/test/api-mock'
 import type { Coach, CoachYear, Receipt, Waiver } from '@/types'
 import {
   useAdminStore,
@@ -116,5 +116,108 @@ describe('admin store', () => {
     expect(api.admin.issueReceipt).toHaveBeenCalledWith({ coachId: 7, year: 2025 })
     expect(admin.coachesByYear[2025]?.[0]?.waiver?.receipt?.number).toBe('2025-0001')
     expect(admin.receiptsByYear[2025]).toHaveLength(1)
+  })
+})
+
+describe('waivers lock ↔ trips', () => {
+  it('waive → create refused locally → withdraw → create allowed', async () => {
+    vi.mocked(api.trips.listByYear).mockResolvedValue([serverTrip(tripInput, { id: 5 })])
+    const trips = useTripsStore()
+    await trips.loadYear(2026)
+    const waivers = useWaiversStore()
+    vi.mocked(api.waivers.create).mockResolvedValue({ ...waiver, year: 2026 })
+    await waivers.waive(2026)
+
+    await expect(trips.create(tripInput)).rejects.toMatchObject({
+      status: 409,
+      message: 'Année 2026 clôturée : vous avez renoncé au remboursement.',
+    })
+    await expect(trips.update(5, { purpose: 'Match' })).rejects.toMatchObject({ status: 409 })
+    await expect(trips.remove(5)).rejects.toMatchObject({ status: 409 })
+    expect(api.trips.create).not.toHaveBeenCalled()
+    expect(api.trips.update).not.toHaveBeenCalled()
+    expect(api.trips.remove).not.toHaveBeenCalled()
+    expect(trips.trips.map((t) => t.id)).toEqual([5])
+    expect(trips.pendingCount).toBe(0)
+
+    vi.mocked(api.waivers.remove).mockResolvedValue()
+    await waivers.withdraw(2026)
+    vi.mocked(api.trips.create).mockResolvedValue(serverTrip(tripInput, { id: 6 }))
+    await expect(trips.create(tripInput)).resolves.toMatchObject({ id: 6 })
+    expect(api.trips.create).toHaveBeenCalledOnce()
+  })
+
+  it('refuses to move a trip into a waived year', async () => {
+    vi.mocked(api.trips.listByYear).mockResolvedValue([serverTrip(tripInput, { id: 5 })])
+    const trips = useTripsStore()
+    await trips.loadYear(2026)
+    useWaiversStore().items = [waiver] // 2025 waived
+    await expect(trips.update(5, { date: '2025-12-31' })).rejects.toMatchObject({ status: 409 })
+    expect(api.trips.update).not.toHaveBeenCalled()
+  })
+
+  it('a 409 from the server reloads the waivers (year locked on another device)', async () => {
+    const trips = useTripsStore()
+    await trips.loadYear(2026)
+    vi.mocked(api.trips.create).mockRejectedValue(
+      httpError(409, "this year's reimbursement was waived"),
+    )
+    vi.mocked(api.waivers.list).mockResolvedValue([{ ...waiver, year: 2026 }])
+
+    await expect(trips.create(tripInput)).rejects.toMatchObject({ status: 409 })
+    await vi.waitFor(() => expect(trips.isYearLocked(2026)).toBe(true))
+    vi.mocked(api.trips.create).mockClear()
+    await expect(trips.create(tripInput)).rejects.toMatchObject({ status: 409 })
+    expect(api.trips.create).not.toHaveBeenCalled()
+  })
+})
+
+describe('admin store: receipts and the coaches list', () => {
+  const rowOf = (id: number, w: Waiver | null): CoachYear => ({
+    coach: { id, firstName: `C${id}` } as Coach,
+    totalKm: 1000,
+    totalAmount: 636,
+    waiver: w ? { ...w } : null,
+  })
+
+  it('issuing a receipt updates the listed coach, and a refetch shows the server state', async () => {
+    vi.mocked(api.admin.coaches).mockResolvedValueOnce([rowOf(7, waiver), rowOf(8, null)])
+    const admin = useAdminStore()
+    await admin.coaches(2025)
+    vi.mocked(api.admin.issueReceipt).mockResolvedValue(receipt)
+
+    await admin.issueReceipt(7, 2025)
+    const rows = admin.coachesByYear[2025]!
+    expect(rows[0]?.waiver?.receipt).toEqual(receipt)
+    expect(rows[1]?.waiver).toBeNull()
+    // The receipts list was never loaded: it is not created half-empty.
+    expect(admin.receiptsByYear[2025]).toBeUndefined()
+
+    vi.mocked(api.admin.coaches).mockResolvedValueOnce([
+      rowOf(7, { ...waiver, receipt }),
+      rowOf(8, { ...waiver, receipt: null }),
+    ])
+    await admin.coaches(2025)
+    expect(admin.coachesByYear[2025]?.map((r) => !!r.waiver?.receipt)).toEqual([true, false])
+    expect(admin.loading).toBe(false)
+  })
+
+  it('leaves the list untouched when the server refuses the receipt', async () => {
+    vi.mocked(api.admin.coaches).mockResolvedValueOnce([rowOf(7, waiver)])
+    const admin = useAdminStore()
+    await admin.coaches(2025)
+    vi.mocked(api.admin.issueReceipt).mockRejectedValue(
+      httpError(409, 'a receipt was already issued for this coach and year'),
+    )
+    await expect(admin.issueReceipt(7, 2025)).rejects.toMatchObject({ status: 409 })
+    expect(admin.coachesByYear[2025]?.[0]?.waiver?.receipt).toBeNull()
+  })
+
+  it('reset forgets every year', async () => {
+    vi.mocked(api.admin.coaches).mockResolvedValueOnce([rowOf(7, waiver)])
+    const admin = useAdminStore()
+    await admin.coaches(2025)
+    admin.reset()
+    expect(admin.coachesByYear).toEqual({})
   })
 })
