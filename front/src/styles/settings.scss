@@ -1,0 +1,5 @@
+// Vuetify SASS settings (compiled by vite-plugin-vuetify). See front/UX.md section 6.
+@use 'vuetify/settings' with (
+  // `rounded="lg"` is the card radius from the brief: 12px.
+  $rounded: ('lg': 12px, 'xl': 24px)
+);

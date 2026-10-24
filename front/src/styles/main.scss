@@ -1,0 +1,35 @@
+// Global styles. Keep this small: Vuetify themes and defaults carry most of the look.
+
+html {
+  // Prevent iOS from inflating text on rotation.
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  font-size: 16px;
+}
+
+// Inputs at 16px minimum, so iOS Safari does not zoom on focus (UX.md section 4).
+input,
+select,
+textarea,
+.v-field__input {
+  font-size: max(16px, 1rem) !important;
+}
+
+// Money and km figures line up.
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
