@@ -2,8 +2,9 @@
 //
 // Every mutation is applied to `items` first, then sent:
 // - success: the local item is replaced by the server's trip, `/summary` is refetched;
-// - network error (or `navigator.onLine === false`): the mutation is queued (persisted) and
-//   the item shows as pending; `flushQueue()` replays the queue later, in order;
+// - network error, timeout or 502/503/504 (or `navigator.onLine === false`): the mutation
+//   is queued (persisted) and the item shows as pending; `flushQueue()` replays the queue
+//   later, in order;
 // - any other `ApiRequestError` (400, 409 locked year…): the local change is rolled back
 //   and the error is rethrown so the UI can show the server message.
 //
@@ -12,7 +13,7 @@
 // trip are folded into the queued create (or cancel it) without any request.
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { ApiRequestError, isApiRequestError, trips as tripsApi } from '@/api'
+import { ApiRequestError, isApiRequestError, isRetryable, trips as tripsApi } from '@/api'
 import { billedKm } from '@/domain'
 import type { Trip, TripInput, TripPatch } from '@/types'
 import { useAuthStore } from './auth'
@@ -58,7 +59,7 @@ export interface FlushResult {
   sent: number
   /** Entries the server rejected (dropped, with a notification). */
   dropped: number
-  /** Entries still queued (a network error stopped the flush). */
+  /** Entries still queued (a network or gateway error stopped the flush). */
   remaining: number
 }
 
@@ -433,7 +434,7 @@ export const useTripsStore = defineStore(
         serverChanged()
         return saved
       } catch (e) {
-        if (isNetworkFailure(e)) {
+        if (isRetryable(e)) {
           enqueue({ kind: 'create', tempId, input: body })
           return findItem(tempId) ?? local
         }
@@ -483,7 +484,7 @@ export const useTripsStore = defineStore(
         serverChanged()
         return saved
       } catch (e) {
-        if (optimistic && isNetworkFailure(e)) {
+        if (optimistic && isRetryable(e)) {
           enqueueUpdate(serverId, patch)
           return optimistic
         }
@@ -520,7 +521,7 @@ export const useTripsStore = defineStore(
         await tripsApi.remove(serverId)
         serverChanged()
       } catch (e) {
-        if (isNetworkFailure(e)) {
+        if (isRetryable(e)) {
           enqueueRemove(serverId)
           return
         }
@@ -582,8 +583,9 @@ export const useTripsStore = defineStore(
             await send(entry)
             sent++
           } catch (e) {
-            // No answer, expired session or unknown failure: keep the entry and stop.
-            if (!isApiRequestError(e) || e.isNetworkError || e.isUnauthorized) break
+            // No answer, API down (502-504), expired session or unknown failure: keep the
+            // entry and stop.
+            if (!isApiRequestError(e) || isRetryable(e) || e.isUnauthorized) break
             dropEntry(entry.key)
             dropped++
             if (entry.kind === 'create') removeItem(entry.tempId)
@@ -615,7 +617,7 @@ export const useTripsStore = defineStore(
     }
 
     /**
-     * Replays this coach's queue in order. Stops at the first network error; drops (and
+     * Replays this coach's queue in order. Stops at the first retryable error; drops (and
      * reports) what the server rejects. Concurrent calls share the same run.
      */
     function flushQueue(): Promise<FlushResult> {

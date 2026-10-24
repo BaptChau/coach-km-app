@@ -8,7 +8,16 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios'
 
-import { auth, http, onUnauthorized, saveBlob, toApiRequestError, trips } from '@/api'
+import {
+  ApiRequestError,
+  auth,
+  http,
+  isRetryable,
+  onUnauthorized,
+  saveBlob,
+  toApiRequestError,
+  trips,
+} from '@/api'
 
 type Answer = (cfg: InternalAxiosRequestConfig) => AxiosResponse | Promise<AxiosResponse>
 
@@ -136,6 +145,23 @@ describe('toApiRequestError', () => {
     )
     expect(forbidden.isForbidden).toBe(true)
     expect(forbidden.message).toBe('HTTP 403')
+  })
+})
+
+describe('isRetryable', () => {
+  const http = (status: number) => new ApiRequestError('http', status, 'x', 'x')
+
+  it('retries no answer, timeouts and gateway errors', () => {
+    expect(isRetryable(new ApiRequestError('network', null, 'x'))).toBe(true)
+    expect(isRetryable(new ApiRequestError('timeout', null, 'x'))).toBe(true)
+    for (const status of [502, 503, 504]) expect(isRetryable(http(status))).toBe(true)
+  })
+
+  it('never retries what the server rejected, a cancel or a foreign error', () => {
+    for (const status of [400, 401, 403, 404, 409, 500])
+      expect(isRetryable(http(status))).toBe(false)
+    expect(isRetryable(new ApiRequestError('canceled', null, 'x'))).toBe(false)
+    expect(isRetryable(new Error('boom'))).toBe(false)
   })
 })
 

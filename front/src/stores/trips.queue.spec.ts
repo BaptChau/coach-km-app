@@ -8,7 +8,7 @@ import { createApp, defineComponent, h, nextTick } from 'vue'
 import { useOnline } from '@/composables/useOnline'
 import { httpError, networkError, serverTrip, tripInput } from '@/test/api-mock'
 import type { Coach, Trip, TripInput, TripPatch } from '@/types'
-import { useAuthStore, useSummaryStore, useTripsStore } from '.'
+import { useAuthStore, useSummaryStore, useTripsStore, useUiStore } from '.'
 
 vi.mock('@/api', async (orig) => (await import('@/test/api-mock')).mockApi(await orig()))
 
@@ -259,6 +259,83 @@ describe('offline queue: flush edge cases', () => {
     await expect(trips.flushQueue()).resolves.toEqual({ sent: 0, dropped: 1, remaining: 0 })
     expect(tripsApi.listByYear).toHaveBeenCalledWith(2026)
     expect(trips.tripById(5)?.distanceKm).toBe(12)
+  })
+})
+
+describe('offline queue: API down behind the proxy (502/503/504)', () => {
+  it.each([502, 503, 504])(
+    'a %i during the flush keeps the entry and a later flush retries with the same clientId',
+    async (status) => {
+      reloadPinia()
+      signIn()
+      const trips = useTripsStore()
+      await trips.loadYear(2026)
+      goOffline()
+      await trips.create({ ...tripInput, destination: 'A' })
+      await trips.create({ ...tripInput, destination: 'B' })
+
+      tripsApi.create.mockRejectedValue(httpError(status, 'Bad Gateway'))
+      await expect(trips.flushQueue()).resolves.toEqual({ sent: 0, dropped: 0, remaining: 2 })
+      expect(trips.queue.map((e) => e.kind)).toEqual(['create', 'create'])
+      expect(trips.trips.filter((t) => t.id < 0)).toHaveLength(2)
+      expect(useUiStore().current).toBeNull() // nothing reported as lost
+
+      const log = recordingServer()
+      await expect(trips.flushQueue()).resolves.toEqual({ sent: 2, dropped: 0, remaining: 0 })
+      expect(log).toEqual(['create A', 'create B'])
+      const clientIdsOfA = tripsApi.create.mock.calls
+        .filter(([input]) => input.destination === 'A')
+        .map(([input]) => input.clientId)
+      expect(new Set(clientIdsOfA)).toEqual(new Set(['client-1']))
+    },
+  )
+
+  it('a 503 on the first create queues the trip as pending', async () => {
+    reloadPinia()
+    signIn()
+    const trips = useTripsStore()
+    await trips.loadYear(2026)
+    tripsApi.create.mockRejectedValueOnce(httpError(503, 'Service Unavailable'))
+
+    const local = await trips.create(tripInput)
+    expect(local.id).toBeLessThan(0)
+    expect(trips.isPending(local.id)).toBe(true)
+    expect(trips.queue[0]).toMatchObject({ kind: 'create', input: { clientId: 'client-1' } })
+  })
+
+  it('a 502 on an edit or a delete queues it instead of rolling back', async () => {
+    reloadPinia()
+    signIn()
+    const trips = useTripsStore()
+    await trips.loadYear(2026)
+    tripsApi.update.mockRejectedValue(httpError(502, 'Bad Gateway'))
+    tripsApi.remove.mockRejectedValue(httpError(504, 'Gateway Timeout'))
+
+    await expect(trips.update(5, { purpose: 'Match' })).resolves.toMatchObject({
+      purpose: 'Match',
+    })
+    await expect(trips.remove(6)).resolves.toBeUndefined()
+    expect(trips.queue.map((e) => e.kind)).toEqual(['update', 'remove'])
+    expect(trips.tripById(5)?.purpose).toBe('Match')
+    expect(trips.tripById(6)).toBeUndefined()
+  })
+
+  it('400 and 409 still roll back the first attempt and drop a queued entry', async () => {
+    reloadPinia()
+    signIn()
+    const trips = useTripsStore()
+    await trips.loadYear(2026)
+
+    tripsApi.create.mockRejectedValueOnce(httpError(400, 'distanceKm must be > 0'))
+    await expect(trips.create(tripInput)).rejects.toMatchObject({ status: 400 })
+    expect(trips.trips).toHaveLength(3)
+    expect(trips.queue).toHaveLength(0)
+
+    tripsApi.create.mockRejectedValueOnce(networkError())
+    await trips.create(tripInput)
+    tripsApi.create.mockRejectedValueOnce(httpError(409, "this year's reimbursement was waived"))
+    await expect(trips.flushQueue()).resolves.toEqual({ sent: 0, dropped: 1, remaining: 0 })
+    expect(trips.trips).toHaveLength(3)
   })
 })
 

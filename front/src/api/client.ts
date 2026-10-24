@@ -91,6 +91,20 @@ export function isApiRequestError(e: unknown): e is ApiRequestError {
   return e instanceof ApiRequestError
 }
 
+/** Gateway statuses: the API is down or unreachable behind the reverse proxy. */
+const TRANSIENT_STATUSES = [502, 503, 504]
+
+/**
+ * The request may succeed if sent again as is: no answer (offline, timeout) or a gateway
+ * error (502/503/504). The offline queue keeps such mutations instead of dropping them.
+ */
+export function isRetryable(e: unknown): boolean {
+  return (
+    isApiRequestError(e) &&
+    (e.isNetworkError || (e.status !== null && TRANSIENT_STATUSES.includes(e.status)))
+  )
+}
+
 export const http = axios.create({
   baseURL: config.apiBaseUrl,
   timeout: REQUEST_TIMEOUT_MS,

@@ -6,6 +6,7 @@ export {
   onUnauthorized,
   ApiRequestError,
   isApiRequestError,
+  isRetryable,
   toApiRequestError,
   REQUEST_TIMEOUT_MS,
   type ApiErrorKind,
