@@ -9,13 +9,13 @@ WHERE id = ? AND user_id = ?
 LIMIT 1;
 
 -- name: CreateVehicle :one
-INSERT INTO vehicles (user_id, label, type)
-VALUES (?, ?, ?)
+INSERT INTO vehicles (user_id, label, type, fiscal_hp, electric)
+VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateVehicle :one
 UPDATE vehicles
-SET label = ?, type = ?
+SET label = ?, type = ?, fiscal_hp = ?, electric = ?
 WHERE id = ? AND user_id = ?
 RETURNING *;
 
@@ -23,6 +23,3 @@ RETURNING *;
 DELETE FROM vehicles
 WHERE id = ? AND user_id = ?;
 
--- name: GetVehicleType :one
-SELECT type FROM vehicles
-WHERE id = ? AND user_id = ?;

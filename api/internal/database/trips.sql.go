@@ -135,6 +135,41 @@ func (q *Queries) GetTripByClientID(ctx context.Context, arg GetTripByClientIDPa
 	return i, err
 }
 
+const listAllVehicles = `-- name: ListAllVehicles :many
+SELECT id, user_id, label, type, fiscal_hp, electric, created_at FROM vehicles
+`
+
+func (q *Queries) ListAllVehicles(ctx context.Context) ([]Vehicle, error) {
+	rows, err := q.db.QueryContext(ctx, listAllVehicles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Vehicle
+	for rows.Next() {
+		var i Vehicle
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Label,
+			&i.Type,
+			&i.FiscalHp,
+			&i.Electric,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTripsByUserYear = `-- name: ListTripsByUserYear :many
 SELECT id, user_id, vehicle_id, client_id, date, origin, destination, purpose, distance_km, round_trip, created_at FROM trips
 WHERE user_id = ?1
@@ -228,6 +263,84 @@ func (q *Queries) SumKmByMonthVehicle(ctx context.Context, arg SumKmByMonthVehic
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumKmByUserVehicle = `-- name: SumKmByUserVehicle :many
+SELECT
+    user_id,
+    vehicle_id,
+    CAST(SUM(CASE WHEN round_trip THEN distance_km * 2 ELSE distance_km END) AS REAL) AS km
+FROM trips
+WHERE date >= ?1 AND date < ?2
+GROUP BY user_id, vehicle_id
+`
+
+type SumKmByUserVehicleParams struct {
+	FromDate string `json:"fromDate"`
+	ToDate   string `json:"toDate"`
+}
+
+type SumKmByUserVehicleRow struct {
+	UserID    int64   `json:"userId"`
+	VehicleID int64   `json:"vehicleId"`
+	Km        float64 `json:"km"`
+}
+
+func (q *Queries) SumKmByUserVehicle(ctx context.Context, arg SumKmByUserVehicleParams) ([]SumKmByUserVehicleRow, error) {
+	rows, err := q.db.QueryContext(ctx, sumKmByUserVehicle, arg.FromDate, arg.ToDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumKmByUserVehicleRow
+	for rows.Next() {
+		var i SumKmByUserVehicleRow
+		if err := rows.Scan(&i.UserID, &i.VehicleID, &i.Km); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const tripYearsForVehicle = `-- name: TripYearsForVehicle :many
+SELECT DISTINCT CAST(substr(date, 1, 4) AS INTEGER) AS year
+FROM trips
+WHERE vehicle_id = ? AND user_id = ?
+`
+
+type TripYearsForVehicleParams struct {
+	VehicleID int64 `json:"vehicleId"`
+	UserID    int64 `json:"userId"`
+}
+
+func (q *Queries) TripYearsForVehicle(ctx context.Context, arg TripYearsForVehicleParams) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, tripYearsForVehicle, arg.VehicleID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var year int64
+		if err := rows.Scan(&year); err != nil {
+			return nil, err
+		}
+		items = append(items, year)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

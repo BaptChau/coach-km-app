@@ -8,10 +8,11 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/BaptChau/coach-km-app/api/internal/config"
 	"github.com/BaptChau/coach-km-app/api/internal/database"
 	"github.com/BaptChau/coach-km-app/api/internal/external"
 	"github.com/BaptChau/coach-km-app/api/internal/httpx"
-	"github.com/BaptChau/coach-km-app/api/internal/rates"
+	"github.com/BaptChau/coach-km-app/api/internal/receipts"
 	"github.com/BaptChau/coach-km-app/api/internal/report"
 	"github.com/BaptChau/coach-km-app/api/internal/trips"
 	"github.com/BaptChau/coach-km-app/api/internal/users"
@@ -22,7 +23,7 @@ type Deps struct {
 	DB                 *database.DB
 	JWTSecret          string
 	RegistrationNumber *regexp.Regexp
-	Rates              *rates.Table
+	Association        config.Association
 	External           *external.Client
 }
 
@@ -39,8 +40,9 @@ func New(d Deps) http.Handler {
 
 	users.NewHandler(d.DB, d.JWTSecret, d.RegistrationNumber).Register(mux)
 	vehicles.NewHandler(d.DB).Register(mux, d.JWTSecret)
-	trips.NewHandler(d.DB, d.Rates).Register(mux, d.JWTSecret)
-	report.NewHandler(d.DB, d.Rates).Register(mux, d.JWTSecret)
+	trips.NewHandler(d.DB).Register(mux, d.JWTSecret)
+	report.NewHandler(d.DB).Register(mux, d.JWTSecret)
+	receipts.NewHandler(d.DB, d.Association).Register(mux, d.JWTSecret)
 	external.NewHandler(d.External).Register(mux, d.JWTSecret)
 
 	return recoverer(logRequests(mux))

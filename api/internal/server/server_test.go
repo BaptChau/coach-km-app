@@ -20,7 +20,6 @@ import (
 	"github.com/BaptChau/coach-km-app/api/internal/config"
 	"github.com/BaptChau/coach-km-app/api/internal/database"
 	"github.com/BaptChau/coach-km-app/api/internal/external"
-	"github.com/BaptChau/coach-km-app/api/internal/rates"
 )
 
 const secret = "test-secret-123"
@@ -30,28 +29,33 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+var testAssociation = config.Association{
+	Name: "US Créteil Basket", Address: "1 rue du Stade", PostalCode: "94000", City: "Créteil",
+	Object: "Pratique du basket-ball", Status: "Œuvre ou organisme d'intérêt général", RNA: "W941234567", SIREN: "123456789",
+}
+
 func newTestServer(t *testing.T, upstreamURL string) *httptest.Server {
+	srv, _ := newTestServerDB(t, upstreamURL, testAssociation)
+	return srv
+}
+
+func newTestServerDB(t *testing.T, upstreamURL string, assoc config.Association) (*httptest.Server, *database.DB) {
 	t.Helper()
-	ctx := context.Background()
-	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	rt, err := rates.Load(ctx, database.New(db.Read))
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	srv := httptest.NewServer(New(Deps{
 		DB:                 db,
 		JWTSecret:          secret,
 		RegistrationNumber: regexp.MustCompile(config.DefaultRegistrationNumberPattern),
-		Rates:              rt,
+		Association:        assoc,
 		External:           external.NewClient(upstreamURL),
 	}))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, db
 }
 
 type response struct {
@@ -98,17 +102,32 @@ func registerBody(email, regNum string) map[string]string {
 }
 
 func register(t *testing.T, srv *httptest.Server, email, regNum string) string {
+	tok, _ := registerID(t, srv, email, regNum)
+	return tok
+}
+
+func registerID(t *testing.T, srv *httptest.Server, email, regNum string) (string, int64) {
 	t.Helper()
 	r := do(t, srv, "POST", "/auth/register", "", registerBody(email, regNum))
 	if r.code != http.StatusCreated {
 		t.Fatalf("register %s: %d %s", email, r.code, r.body)
 	}
-	return decode[struct{ Token string }](t, r).Token
+	out := decode[struct {
+		Token string
+		Coach struct{ ID int64 }
+	}](t, r)
+	return out.Token, out.Coach.ID
 }
 
+// createVehicle makes a 5 CV car, or the given type with 4 CV (ignored for a moped).
 func createVehicle(t *testing.T, srv *httptest.Server, token, typ string) int64 {
 	t.Helper()
-	r := do(t, srv, "POST", "/vehicles", token, map[string]string{"label": "Clio", "type": typ})
+	return createVehicleWith(t, srv, token, map[string]any{"label": "Clio", "type": typ, "fiscalHorsepower": map[bool]int{true: 5, false: 4}[typ == "car"]})
+}
+
+func createVehicleWith(t *testing.T, srv *httptest.Server, token string, body map[string]any) int64 {
+	t.Helper()
+	r := do(t, srv, "POST", "/vehicles", token, body)
 	if r.code != http.StatusCreated {
 		t.Fatalf("create vehicle: %d %s", r.code, r.body)
 	}
@@ -123,8 +142,6 @@ type trip struct {
 	DistanceKm float64
 	RoundTrip  bool
 	BilledKm   float64
-	Rate       float64
-	Amount     float64
 }
 
 func TestAuth(t *testing.T) {
@@ -185,8 +202,15 @@ func TestVehicles(t *testing.T) {
 	if r := do(t, srv, "POST", "/vehicles", alice, map[string]string{"label": "Bus", "type": "bus"}); r.code != 400 {
 		t.Errorf("bad type: want 400, got %d", r.code)
 	}
-	if r := do(t, srv, "PATCH", path, alice, map[string]string{"type": "two_wheeler"}); r.code != 200 || !bytes.Contains(r.body, []byte(`"label":"Clio"`)) || !bytes.Contains(r.body, []byte("two_wheeler")) {
+	if r := do(t, srv, "POST", "/vehicles", alice, map[string]any{"label": "Clio", "type": "car"}); r.code != 400 {
+		t.Errorf("car without fiscalHorsepower: want 400, got %d", r.code)
+	}
+	if r := do(t, srv, "PATCH", path, alice, map[string]any{"type": "motorcycle", "electric": true}); r.code != 200 ||
+		!bytes.Contains(r.body, []byte(`"label":"Clio"`)) || !bytes.Contains(r.body, []byte(`"fiscalHorsepower":5`)) || !bytes.Contains(r.body, []byte(`"electric":true`)) {
 		t.Errorf("patch keeps unsent fields: %d %s", r.code, r.body)
+	}
+	if r := do(t, srv, "PATCH", path, alice, map[string]any{"type": "moped"}); r.code != 200 || !bytes.Contains(r.body, []byte(`"fiscalHorsepower":null`)) {
+		t.Errorf("moped drops horsepower: %d %s", r.code, r.body)
 	}
 	if r := do(t, srv, "PATCH", path, bob, map[string]string{"label": "mine"}); r.code != 404 {
 		t.Errorf("bob patch: want 404, got %d", r.code)
@@ -217,9 +241,8 @@ func TestTripsCRUDOwnershipAndAmounts(t *testing.T) {
 		t.Fatalf("create: %d %s", r.code, r.body)
 	}
 	created := decode[trip](t, r)
-	// 100 km round trip = 200 km at the 2023 car rate of 0.331 €/km.
-	if created.BilledKm != 200 || created.Rate != 0.331 || created.Amount != 66.2 {
-		t.Errorf("amounts: %+v", created)
+	if created.BilledKm != 200 || bytes.Contains(r.body, []byte("amount")) {
+		t.Errorf("trip: %s", r.body)
 	}
 	path := fmt.Sprintf("/trips/%d", created.ID)
 
@@ -300,12 +323,13 @@ func TestTripCreateIsIdempotentOnClientID(t *testing.T) {
 func TestSummaryRatesAndExport(t *testing.T) {
 	srv := newTestServer(t, "")
 	tok := register(t, srv, "coach@club.fr", "5655006000003")
-	car, moto := createVehicle(t, srv, tok, "car"), createVehicle(t, srv, tok, "two_wheeler")
+	car := createVehicle(t, srv, tok, "car") // 5 CV
+	moto := createVehicleWith(t, srv, tok, map[string]any{"label": "Zero", "type": "motorcycle", "fiscalHorsepower": 4, "electric": true})
 	for _, b := range []map[string]any{
-		{"date": "2023-01-10", "vehicleId": car, "distanceKm": 50, "roundTrip": true},   // 100 km × 0.331 = 33.10
-		{"date": "2023-01-20", "vehicleId": moto, "distanceKm": 10, "roundTrip": false}, // 10 km × 0.128 = 1.28
-		{"date": "2023-03-05", "vehicleId": car, "distanceKm": 10.5},                    // 10.5 km × 0.331 = 3.4755 -> 3.48
-		{"date": "2024-03-05", "vehicleId": car, "distanceKm": 999},                     // other year
+		{"date": "2023-01-10", "vehicleId": car, "distanceKm": 50, "roundTrip": true}, // 100 km
+		{"date": "2023-01-20", "vehicleId": moto, "distanceKm": 10},                   // 10 km
+		{"date": "2023-03-05", "vehicleId": car, "distanceKm": 10.5},                  // 10.5 km
+		{"date": "2024-03-05", "vehicleId": car, "distanceKm": 999},                   // other year
 	} {
 		b["origin"], b["destination"], b["purpose"] = "Créteil", "Évry", "Entraînement"
 		if r := do(t, srv, "POST", "/trips", tok, b); r.code != 201 {
@@ -314,7 +338,6 @@ func TestSummaryRatesAndExport(t *testing.T) {
 	}
 
 	type summary struct {
-		Provisional bool
 		TotalKm     float64
 		TotalAmount float64
 		ByMonth     []struct {
@@ -328,22 +351,22 @@ func TestSummaryRatesAndExport(t *testing.T) {
 			Amount    float64
 		}
 	}
+	// Car 5 CV: 110.5 km × 0.636 = 70.28. Electric motorcycle 4 CV:
+	// 10 km × 0.468 × 1.2 = 5.62. The car's 70.28 is spread pro rata over
+	// January (100 km) and March (10.5 km): 63.60 + 6.68.
 	s := decode[summary](t, do(t, srv, "GET", "/summary?year=2023", tok, nil))
-	if s.Provisional || s.TotalKm != 120.5 || s.TotalAmount != 37.86 || len(s.ByMonth) != 12 {
+	if s.TotalKm != 120.5 || s.TotalAmount != 75.90 || len(s.ByMonth) != 12 {
 		t.Errorf("summary totals: %+v", s)
 	}
-	if s.ByMonth[0].Km != 110 || s.ByMonth[0].Amount != 34.38 || s.ByMonth[2].Amount != 3.48 {
+	if s.ByMonth[0].Km != 110 || s.ByMonth[0].Amount != 69.22 || s.ByMonth[2].Amount != 6.68 {
 		t.Errorf("summary by month: %+v", s.ByMonth[:3])
 	}
-	if len(s.ByVehicle) != 2 || s.ByVehicle[0].Km != 110.5 || s.ByVehicle[1].Amount != 1.28 {
+	if len(s.ByVehicle) != 2 || s.ByVehicle[0].Amount != 70.28 || s.ByVehicle[1].Amount != 5.62 {
 		t.Errorf("summary by vehicle: %+v", s.ByVehicle)
 	}
 
-	if r := do(t, srv, "GET", "/rates?year=2023", "", nil); r.code != 200 || !bytes.Contains(r.body, []byte(`"car":0.331`)) || !bytes.Contains(r.body, []byte(`"provisional":false`)) {
-		t.Errorf("rates 2023: %d %s", r.code, r.body)
-	}
-	if r := do(t, srv, "GET", "/rates?year=2026", "", nil); !bytes.Contains(r.body, []byte(`"provisional":true`)) {
-		t.Errorf("rates 2026 should fall back as provisional: %s", r.body)
+	if r := do(t, srv, "GET", "/rates?year=2025", "", nil); r.code != 200 || !bytes.Contains(r.body, []byte(`"fromYear":2022`)) || !bytes.Contains(r.body, []byte(`"electricIncrease":0.2`)) {
+		t.Errorf("rates: %d %s", r.code, r.body)
 	}
 
 	r := do(t, srv, "GET", "/export?year=2023&format=csv", tok, nil)
@@ -351,7 +374,7 @@ func TestSummaryRatesAndExport(t *testing.T) {
 		t.Fatalf("csv: %d %v", r.code, r.header)
 	}
 	csv := string(r.body)
-	if !strings.Contains(csv, "Évry") || !strings.Contains(csv, "Total;;;;;;;;120,5;;37,86") || strings.Contains(csv, "999") {
+	if !strings.Contains(csv, "Évry") || !strings.Contains(csv, "Total;;120,5;75,90") || !strings.Contains(csv, "Moto 4 CV électrique") || strings.Contains(csv, "999") {
 		t.Errorf("csv content:\n%s", csv)
 	}
 	r = do(t, srv, "GET", "/export?year=2023&format=pdf", tok, nil)
@@ -360,6 +383,184 @@ func TestSummaryRatesAndExport(t *testing.T) {
 	}
 	if r := do(t, srv, "GET", "/export?format=xls", tok, nil); r.code != 400 {
 		t.Errorf("bad format: want 400, got %d", r.code)
+	}
+}
+
+type receipt struct {
+	ID      int64
+	Number  string
+	CoachID int64
+	Amount  float64
+}
+
+func TestWaiversAndReceipts(t *testing.T) {
+	srv, db := newTestServerDB(t, "", testAssociation)
+	ctx := context.Background()
+	coach, coachID := registerID(t, srv, "coach@club.fr", "5655006000001")
+	other := register(t, srv, "other@club.fr", "5655006000002")
+	pres := register(t, srv, "pres@club.fr", "5655006000009")
+	if _, err := db.WriteQueries().SetRoleByEmail(ctx, database.SetRoleByEmailParams{Role: "president", Email: "pres@club.fr"}); err != nil {
+		t.Fatal(err)
+	}
+
+	car := createVehicle(t, srv, coach, "car") // 5 CV: 100 km = 63.60 €
+	tripBody := map[string]any{"date": "2025-03-01", "origin": "A", "destination": "B", "purpose": "Match", "vehicleId": car, "distanceKm": 100}
+	tr := decode[trip](t, do(t, srv, "POST", "/trips", coach, tripBody))
+	tripPath := fmt.Sprintf("/trips/%d", tr.ID)
+
+	if r := do(t, srv, "POST", "/waivers", coach, map[string]int{"year": 2025}); r.code != 400 || !bytes.Contains(r.body, []byte("address")) {
+		t.Errorf("waiver without address: want 400, got %d %s", r.code, r.body)
+	}
+	addr := map[string]any{"address": map[string]string{"line": "3 allée des Pins", "postalCode": "94000", "city": "Créteil"}}
+	if r := do(t, srv, "PATCH", "/auth/me", coach, addr); r.code != 200 || !bytes.Contains(r.body, []byte("allée des Pins")) {
+		t.Fatalf("set address: %d %s", r.code, r.body)
+	}
+	if r := do(t, srv, "POST", "/waivers", coach, map[string]int{"year": 2025}); r.code != 201 || !bytes.Contains(r.body, []byte(`"amount":63.6`)) {
+		t.Fatalf("waiver: %d %s", r.code, r.body)
+	}
+	if r := do(t, srv, "POST", "/waivers", coach, map[string]int{"year": 2025}); r.code != 409 {
+		t.Errorf("second waiver: want 409, got %d", r.code)
+	}
+
+	// The waived year is frozen; other years aren't.
+	if r := do(t, srv, "POST", "/trips", coach, tripBody); r.code != 409 {
+		t.Errorf("create in waived year: want 409, got %d", r.code)
+	}
+	if r := do(t, srv, "PATCH", tripPath, coach, map[string]any{"distanceKm": 5}); r.code != 409 {
+		t.Errorf("patch in waived year: want 409, got %d", r.code)
+	}
+	if r := do(t, srv, "DELETE", tripPath, coach, nil); r.code != 409 {
+		t.Errorf("delete in waived year: want 409, got %d", r.code)
+	}
+	tripBody["date"] = "2024-03-01"
+	if r := do(t, srv, "POST", "/trips", coach, tripBody); r.code != 201 {
+		t.Errorf("create in open year: want 201, got %d", r.code)
+	}
+	vehiclePath := fmt.Sprintf("/vehicles/%d", car)
+	if r := do(t, srv, "PATCH", vehiclePath, coach, map[string]any{"fiscalHorsepower": 7}); r.code != 409 {
+		t.Errorf("re-rating a vehicle used in a waived year: want 409, got %d", r.code)
+	}
+	if r := do(t, srv, "PATCH", vehiclePath, coach, map[string]any{"label": "Clio 4"}); r.code != 200 {
+		t.Errorf("relabel: want 200, got %d", r.code)
+	}
+
+	// President-only endpoints.
+	if r := do(t, srv, "GET", "/admin/coaches?year=2025", coach, nil); r.code != 403 {
+		t.Errorf("coach on admin route: want 403, got %d", r.code)
+	}
+	r := do(t, srv, "GET", "/admin/coaches?year=2025", pres, nil)
+	if r.code != 200 || !bytes.Contains(r.body, []byte(`"totalAmount":63.6`)) || !bytes.Contains(r.body, []byte(`"waiver":{"year":2025`)) {
+		t.Errorf("admin coaches: %d %s", r.code, r.body)
+	}
+	if r := do(t, srv, "POST", "/admin/receipts", pres, map[string]any{"coachId": coachID + 1, "year": 2025}); r.code != 409 {
+		t.Errorf("receipt without waiver: want 409, got %d", r.code)
+	}
+	r = do(t, srv, "POST", "/admin/receipts", pres, map[string]any{"coachId": coachID, "year": 2025})
+	rc := decode[receipt](t, r)
+	if r.code != 201 || rc.Number != "2025-0001" || rc.Amount != 63.6 {
+		t.Fatalf("issue receipt: %d %s", r.code, r.body)
+	}
+	if r := do(t, srv, "POST", "/admin/receipts", pres, map[string]any{"coachId": coachID, "year": 2025}); r.code != 409 {
+		t.Errorf("second receipt: want 409, got %d", r.code)
+	}
+	if r := do(t, srv, "DELETE", "/waivers/2025", coach, nil); r.code != 409 {
+		t.Errorf("withdraw waiver after receipt: want 409, got %d", r.code)
+	}
+
+	pdfPath := fmt.Sprintf("/receipts/%d/pdf", rc.ID)
+	for _, c := range []struct {
+		who  string
+		tok  string
+		want int
+	}{{"coach", coach, 200}, {"president", pres, 200}, {"other coach", other, 404}} {
+		r := do(t, srv, "GET", pdfPath, c.tok, nil)
+		if r.code != c.want {
+			t.Errorf("%s downloads receipt: want %d, got %d", c.who, c.want, r.code)
+		}
+		if c.want == 200 && (!bytes.HasPrefix(r.body, []byte("%PDF")) || !strings.Contains(r.header.Get("Content-Disposition"), "recu-fiscal-2025-0001.pdf")) {
+			t.Errorf("%s: not a receipt PDF: %v", c.who, r.header)
+		}
+	}
+	if ws := do(t, srv, "GET", "/waivers", coach, nil); !bytes.Contains(ws.body, []byte(`"number":"2025-0001"`)) {
+		t.Errorf("waivers list shows receipt: %s", ws.body)
+	}
+}
+
+func TestWaiverWithdrawalUnlocksYear(t *testing.T) {
+	srv := newTestServer(t, "")
+	tok := register(t, srv, "coach@club.fr", "5655006000001")
+	do(t, srv, "PATCH", "/auth/me", tok, map[string]any{"address": map[string]string{"line": "x", "postalCode": "94000", "city": "Créteil"}})
+	car := createVehicle(t, srv, tok, "car")
+	body := map[string]any{"date": "2025-03-01", "origin": "A", "destination": "B", "purpose": "Match", "vehicleId": car, "distanceKm": 10}
+	do(t, srv, "POST", "/trips", tok, body)
+
+	if r := do(t, srv, "POST", "/waivers", tok, map[string]int{"year": 2025}); r.code != 201 {
+		t.Fatalf("waiver: %d %s", r.code, r.body)
+	}
+	if r := do(t, srv, "DELETE", "/waivers/2025", tok, nil); r.code != 204 {
+		t.Fatalf("withdraw: want 204, got %d", r.code)
+	}
+	if r := do(t, srv, "POST", "/trips", tok, body); r.code != 201 {
+		t.Errorf("year should be open again: got %d", r.code)
+	}
+	if r := do(t, srv, "POST", "/waivers", tok, map[string]int{"year": 2019}); r.code != 400 {
+		t.Errorf("waiver with no mileage: want 400, got %d", r.code)
+	}
+}
+
+func TestConcurrentReceiptNumbering(t *testing.T) {
+	srv, db := newTestServerDB(t, "", testAssociation)
+	pres := register(t, srv, "pres@club.fr", "5655006000009")
+	db.WriteQueries().SetRoleByEmail(context.Background(), database.SetRoleByEmailParams{Role: "president", Email: "pres@club.fr"})
+
+	const n = 8
+	ids := make([]int64, n)
+	for i := range n {
+		tok, id := registerID(t, srv, fmt.Sprintf("c%d@club.fr", i), fmt.Sprintf("5655006%06d", 100+i))
+		ids[i] = id
+		do(t, srv, "PATCH", "/auth/me", tok, map[string]any{"address": map[string]string{"line": "x", "postalCode": "94000", "city": "Créteil"}})
+		car := createVehicle(t, srv, tok, "car")
+		do(t, srv, "POST", "/trips", tok, map[string]any{"date": "2025-05-01", "origin": "A", "destination": "B", "purpose": "p", "vehicleId": car, "distanceKm": 20})
+		if r := do(t, srv, "POST", "/waivers", tok, map[string]int{"year": 2025}); r.code != 201 {
+			t.Fatalf("waiver: %d %s", r.code, r.body)
+		}
+	}
+
+	numbers := make([]string, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := do(t, srv, "POST", "/admin/receipts", pres, map[string]any{"coachId": ids[i], "year": 2025})
+			if r.code != 201 {
+				t.Errorf("issue: %d %s", r.code, r.body)
+				return
+			}
+			numbers[i] = decode[receipt](t, r).Number
+		}()
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	for _, num := range numbers {
+		if seen[num] {
+			t.Errorf("duplicate receipt number %s in %v", num, numbers)
+		}
+		seen[num] = true
+	}
+	for i := 1; i <= n; i++ {
+		if !seen[fmt.Sprintf("2025-%04d", i)] {
+			t.Errorf("numbers have a gap: %v", numbers)
+		}
+	}
+}
+
+func TestReceiptNeedsAssociationConfig(t *testing.T) {
+	srv, db := newTestServerDB(t, "", config.Association{})
+	pres := register(t, srv, "pres@club.fr", "5655006000009")
+	db.WriteQueries().SetRoleByEmail(context.Background(), database.SetRoleByEmailParams{Role: "president", Email: "pres@club.fr"})
+	if r := do(t, srv, "POST", "/admin/receipts", pres, map[string]any{"coachId": 1, "year": 2025}); r.code != http.StatusServiceUnavailable {
+		t.Errorf("want 503 without association config, got %d", r.code)
 	}
 }
 

@@ -24,19 +24,12 @@ const (
 )
 
 type Handler struct {
-	db     *database.DB
-	reads  *database.Queries
-	writes *database.Queries
-	rates  *rates.Table
+	db    *database.DB
+	reads *database.Queries
 }
 
-func NewHandler(db *database.DB, rt *rates.Table) *Handler {
-	return &Handler{
-		db:     db,
-		reads:  database.New(db.Read),
-		writes: database.New(db.Write),
-		rates:  rt,
-	}
+func NewHandler(db *database.DB) *Handler {
+	return &Handler{db: db, reads: database.New(db.Read)}
 }
 
 func (h *Handler) Register(mux *http.ServeMux, jwtSecret string) {
@@ -70,15 +63,12 @@ type Trip struct {
 	DistanceKm  float64   `json:"distanceKm"`
 	RoundTrip   bool      `json:"roundTrip"`
 	BilledKm    float64   `json:"billedKm"`
-	Rate        float64   `json:"rate"`
-	Amount      float64   `json:"amount"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
-func (h *Handler) toResponse(t database.Trip, vehicleType string) Trip {
-	year, _ := strconv.Atoi(t.Date[:4])
-	rt := h.rates.For(year)
-	billed := rates.BilledKm(t.DistanceKm, t.RoundTrip)
+// Trips carry no € amount: the barème is tiered on the yearly distance per
+// vehicle, so money only exists in /summary.
+func toResponse(t database.Trip) Trip {
 	return Trip{
 		ID:          t.ID,
 		ClientID:    t.ClientID,
@@ -89,9 +79,7 @@ func (h *Handler) toResponse(t database.Trip, vehicleType string) Trip {
 		VehicleID:   t.VehicleID,
 		DistanceKm:  t.DistanceKm,
 		RoundTrip:   t.RoundTrip,
-		BilledKm:    billed,
-		Rate:        rt.EurPerKm(vehicleType),
-		Amount:      rates.Euros(rt.AmountCents(vehicleType, billed)),
+		BilledKm:    rates.BilledKm(t.DistanceKm, t.RoundTrip),
 		CreatedAt:   t.CreatedAt,
 	}
 }
@@ -138,7 +126,29 @@ func (in tripInput) apply(t *database.Trip) string {
 	return ""
 }
 
-var errNotFound = errors.New("not found")
+var (
+	errNotFound = errors.New("not found")
+	errLocked   = errors.New("locked")
+)
+
+const lockedMsg = "this year's reimbursement was waived; its trips can no longer change"
+
+// checkUnlocked fails with errLocked when the coach waived reimbursement for
+// the year of date: the declared amount must keep matching the trips.
+func checkUnlocked(r *http.Request, q *database.Queries, userID int64, date string) error {
+	year, err := strconv.ParseInt(date[:4], 10, 64)
+	if err != nil {
+		return err
+	}
+	waived, err := q.WaiverExists(r.Context(), database.WaiverExistsParams{UserID: userID, Year: year})
+	if err != nil {
+		return err
+	}
+	if waived {
+		return errLocked
+	}
+	return nil
+}
 
 const badVehicle = "vehicleId must be one of your vehicles"
 
@@ -167,31 +177,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	types, err := h.vehicleTypes(r, userID)
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-
 	out := make([]Trip, len(rows))
 	for i, t := range rows {
-		out[i] = h.toResponse(t, types[t.VehicleID])
+		out[i] = toResponse(t)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
-}
-
-// vehicleTypes maps the user's vehicle ids to their type: one small indexed
-// query instead of one lookup per trip.
-func (h *Handler) vehicleTypes(r *http.Request, userID int64) (map[int64]string, error) {
-	vs, err := h.reads.ListVehiclesByUser(r.Context(), userID)
-	if err != nil {
-		return nil, err
-	}
-	m := make(map[int64]string, len(vs))
-	for _, v := range vs {
-		m[v.ID] = v.Type
-	}
-	return m, nil
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -216,8 +206,27 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := http.StatusCreated
-	var vehicleType string
 	err := h.db.WriteTx(r.Context(), func(q *database.Queries) error {
+		if t.ClientID != nil {
+			// Same clientId already stored: a replayed offline request.
+			// Answer with the original trip instead of a duplicate, even if
+			// its year has been locked since.
+			existing, err := q.GetTripByClientID(r.Context(), database.GetTripByClientIDParams{
+				UserID: userID, ClientID: t.ClientID,
+			})
+			if err == nil {
+				status, t = http.StatusOK, existing
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
+		if err := checkUnlocked(r, q, userID, t.Date); err != nil {
+			return err
+		}
+		// The write transaction is BEGIN IMMEDIATE, so no other writer can
+		// insert the same clientId between the lookup above and this insert.
 		created, err := q.CreateTrip(r.Context(), database.CreateTripParams{
 			UserID:      userID,
 			VehicleID:   t.VehicleID,
@@ -229,28 +238,18 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			DistanceKm:  t.DistanceKm,
 			RoundTrip:   t.RoundTrip,
 		})
-		if errors.Is(err, sql.ErrNoRows) && t.ClientID != nil {
-			// Same clientId already stored: a replayed offline request.
-			// Answer with the original trip instead of a duplicate.
-			status = http.StatusOK
-			created, err = q.GetTripByClientID(r.Context(), database.GetTripByClientIDParams{
-				UserID: userID, ClientID: t.ClientID,
-			})
-		}
-		if err != nil {
-			return err
-		}
 		t = created
-		vehicleType, err = q.GetVehicleType(r.Context(), database.GetVehicleTypeParams{ID: t.VehicleID, UserID: userID})
 		return err
 	})
 	switch {
+	case errors.Is(err, errLocked):
+		httpx.Error(w, http.StatusConflict, lockedMsg)
 	case database.IsForeignKeyViolation(err):
 		httpx.Error(w, http.StatusBadRequest, badVehicle)
 	case err != nil:
 		httpx.Internal(w, r, err)
 	default:
-		httpx.WriteJSON(w, status, h.toResponse(t, vehicleType))
+		httpx.WriteJSON(w, status, toResponse(t))
 	}
 }
 
@@ -270,12 +269,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		httpx.Internal(w, r, err)
 		return
 	}
-	vehicleType, err := h.reads.GetVehicleType(r.Context(), database.GetVehicleTypeParams{ID: trip.VehicleID, UserID: userID})
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, h.toResponse(trip, vehicleType))
+	httpx.WriteJSON(w, http.StatusOK, toResponse(trip))
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
@@ -295,9 +289,8 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		updated     database.Trip
-		vehicleType string
-		msg         string
+		updated database.Trip
+		msg     string
 	)
 	err := h.db.WriteTx(r.Context(), func(q *database.Queries) error {
 		t, err := q.GetTrip(r.Context(), database.GetTripParams{ID: id, UserID: userID})
@@ -307,8 +300,15 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		// Both the old and the new date must be in unlocked years.
+		if err := checkUnlocked(r, q, userID, t.Date); err != nil {
+			return err
+		}
 		if msg = in.apply(&t); msg != "" {
 			return nil
+		}
+		if err := checkUnlocked(r, q, userID, t.Date); err != nil {
+			return err
 		}
 		updated, err = q.UpdateTrip(r.Context(), database.UpdateTripParams{
 			VehicleID:   t.VehicleID,
@@ -321,15 +321,13 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			ID:          id,
 			UserID:      userID,
 		})
-		if err != nil {
-			return err
-		}
-		vehicleType, err = q.GetVehicleType(r.Context(), database.GetVehicleTypeParams{ID: t.VehicleID, UserID: userID})
 		return err
 	})
 	switch {
 	case errors.Is(err, errNotFound):
 		notFound(w)
+	case errors.Is(err, errLocked):
+		httpx.Error(w, http.StatusConflict, lockedMsg)
 	case database.IsForeignKeyViolation(err):
 		httpx.Error(w, http.StatusBadRequest, badVehicle)
 	case err != nil:
@@ -337,7 +335,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	case msg != "":
 		httpx.Error(w, http.StatusBadRequest, msg)
 	default:
-		httpx.WriteJSON(w, http.StatusOK, h.toResponse(updated, vehicleType))
+		httpx.WriteJSON(w, http.StatusOK, toResponse(updated))
 	}
 }
 
@@ -348,16 +346,30 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	n, err := h.writes.DeleteTrip(r.Context(), database.DeleteTripParams{ID: id, UserID: userID})
-	if err != nil {
-		httpx.Internal(w, r, err)
-		return
-	}
-	if n == 0 {
+	err := h.db.WriteTx(r.Context(), func(q *database.Queries) error {
+		t, err := q.GetTrip(r.Context(), database.GetTripParams{ID: id, UserID: userID})
+		if errors.Is(err, sql.ErrNoRows) {
+			return errNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if err := checkUnlocked(r, q, userID, t.Date); err != nil {
+			return err
+		}
+		_, err = q.DeleteTrip(r.Context(), database.DeleteTripParams{ID: id, UserID: userID})
+		return err
+	})
+	switch {
+	case errors.Is(err, errNotFound):
 		notFound(w)
-		return
+	case errors.Is(err, errLocked):
+		httpx.Error(w, http.StatusConflict, lockedMsg)
+	case err != nil:
+		httpx.Internal(w, r, err)
+	default:
+		w.WriteHeader(http.StatusNoContent)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // Another user's trip and a missing trip both answer 404, so ids can't be

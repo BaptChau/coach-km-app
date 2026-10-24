@@ -71,9 +71,11 @@ func (d *DB) Close() error {
 	return errors.Join(d.Read.Close(), d.Write.Close())
 }
 
+// IsUniqueViolation matches UNIQUE and PRIMARY KEY conflicts.
 func IsUniqueViolation(err error) bool {
 	var se *sqlite.Error
-	return errors.As(err, &se) && se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+	return errors.As(err, &se) &&
+		(se.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE || se.Code() == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY)
 }
 
 // IsForeignKeyViolation also matches ON DELETE RESTRICT, which SQLite
@@ -107,3 +109,6 @@ func (d *DB) WriteTx(ctx context.Context, fn func(q *Queries) error) error {
 	}
 	return tx.Commit()
 }
+
+// WriteQueries runs single statements on the writer connection.
+func (d *DB) WriteQueries() *Queries { return New(d.Write) }

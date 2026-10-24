@@ -12,3 +12,18 @@ LIMIT 1;
 SELECT * FROM users
 WHERE id = ?
 LIMIT 1;
+
+-- name: UpdateProfile :one
+UPDATE users
+SET first_name = ?, last_name = ?, address_line = ?, postal_code = ?, city = ?
+WHERE id = ?
+RETURNING *;
+
+-- name: SetRoleByEmail :execrows
+UPDATE users
+SET role = ?
+WHERE email = ?;
+
+-- name: ListUsers :many
+SELECT * FROM users
+ORDER BY last_name, first_name, id;

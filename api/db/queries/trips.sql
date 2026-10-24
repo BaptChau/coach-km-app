@@ -31,6 +31,11 @@ RETURNING *;
 DELETE FROM trips
 WHERE id = ? AND user_id = ?;
 
+-- name: TripYearsForVehicle :many
+SELECT DISTINCT CAST(substr(date, 1, 4) AS INTEGER) AS year
+FROM trips
+WHERE vehicle_id = ? AND user_id = ?;
+
 -- name: SumKmByMonthVehicle :many
 SELECT
     CAST(substr(date, 6, 2) AS INTEGER) AS month,
@@ -40,3 +45,15 @@ FROM trips
 WHERE user_id = sqlc.arg(user_id)
   AND date >= sqlc.arg(from_date) AND date < sqlc.arg(to_date)
 GROUP BY month, vehicle_id;
+
+-- name: SumKmByUserVehicle :many
+SELECT
+    user_id,
+    vehicle_id,
+    CAST(SUM(CASE WHEN round_trip THEN distance_km * 2 ELSE distance_km END) AS REAL) AS km
+FROM trips
+WHERE date >= sqlc.arg(from_date) AND date < sqlc.arg(to_date)
+GROUP BY user_id, vehicle_id;
+
+-- name: ListAllVehicles :many
+SELECT * FROM vehicles;

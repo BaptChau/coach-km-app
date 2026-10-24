@@ -12,7 +12,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, registration_number, first_name, last_name, password_hash)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, email, registration_number, first_name, last_name, password_hash, created_at
+RETURNING id, email, registration_number, first_name, last_name, password_hash, role, address_line, postal_code, city, created_at
 `
 
 type CreateUserParams struct {
@@ -39,13 +39,17 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.FirstName,
 		&i.LastName,
 		&i.PasswordHash,
+		&i.Role,
+		&i.AddressLine,
+		&i.PostalCode,
+		&i.City,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, registration_number, first_name, last_name, password_hash, created_at FROM users
+SELECT id, email, registration_number, first_name, last_name, password_hash, role, address_line, postal_code, city, created_at FROM users
 WHERE email = ?
 LIMIT 1
 `
@@ -60,13 +64,17 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.FirstName,
 		&i.LastName,
 		&i.PasswordHash,
+		&i.Role,
+		&i.AddressLine,
+		&i.PostalCode,
+		&i.City,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, registration_number, first_name, last_name, password_hash, created_at FROM users
+SELECT id, email, registration_number, first_name, last_name, password_hash, role, address_line, postal_code, city, created_at FROM users
 WHERE id = ?
 LIMIT 1
 `
@@ -81,6 +89,111 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.FirstName,
 		&i.LastName,
 		&i.PasswordHash,
+		&i.Role,
+		&i.AddressLine,
+		&i.PostalCode,
+		&i.City,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT id, email, registration_number, first_name, last_name, password_hash, role, address_line, postal_code, city, created_at FROM users
+ORDER BY last_name, first_name, id
+`
+
+func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.RegistrationNumber,
+			&i.FirstName,
+			&i.LastName,
+			&i.PasswordHash,
+			&i.Role,
+			&i.AddressLine,
+			&i.PostalCode,
+			&i.City,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setRoleByEmail = `-- name: SetRoleByEmail :execrows
+UPDATE users
+SET role = ?
+WHERE email = ?
+`
+
+type SetRoleByEmailParams struct {
+	Role  string `json:"role"`
+	Email string `json:"email"`
+}
+
+func (q *Queries) SetRoleByEmail(ctx context.Context, arg SetRoleByEmailParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setRoleByEmail, arg.Role, arg.Email)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const updateProfile = `-- name: UpdateProfile :one
+UPDATE users
+SET first_name = ?, last_name = ?, address_line = ?, postal_code = ?, city = ?
+WHERE id = ?
+RETURNING id, email, registration_number, first_name, last_name, password_hash, role, address_line, postal_code, city, created_at
+`
+
+type UpdateProfileParams struct {
+	FirstName   string `json:"firstName"`
+	LastName    string `json:"lastName"`
+	AddressLine string `json:"addressLine"`
+	PostalCode  string `json:"postalCode"`
+	City        string `json:"city"`
+	ID          int64  `json:"id"`
+}
+
+func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateProfile,
+		arg.FirstName,
+		arg.LastName,
+		arg.AddressLine,
+		arg.PostalCode,
+		arg.City,
+		arg.ID,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.RegistrationNumber,
+		&i.FirstName,
+		&i.LastName,
+		&i.PasswordHash,
+		&i.Role,
+		&i.AddressLine,
+		&i.PostalCode,
+		&i.City,
 		&i.CreatedAt,
 	)
 	return i, err
