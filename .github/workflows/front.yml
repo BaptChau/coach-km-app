@@ -1,0 +1,43 @@
+name: Front
+
+on:
+  pull_request:
+    paths:
+      - 'front/**'
+      - '.github/workflows/front.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'front/**'
+      - '.github/workflows/front.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: front-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: front
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - run: npm ci
+
+      # format check + lint + type-check + unit tests
+      - run: npm run check
+
+      - run: npm run test:coverage
+
+      - run: npm run build
