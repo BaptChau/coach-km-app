@@ -610,7 +610,8 @@ export const useTripsStore = defineStore(
       }
       if (sent || dropped) serverChanged()
       if (reload && loadedYear.value != null) await loadYear(loadedYear.value).catch(() => {})
-      return { sent, dropped, remaining: myQueue.value.length }
+      // Counted for the flush's owner: a 401 may have ended the session meanwhile.
+      return { sent, dropped, remaining: queue.value.filter((e) => e.coachId === owner).length }
     }
 
     /**
