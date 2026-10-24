@@ -50,7 +50,9 @@ export default defineConfig(({ mode }) => {
           icons: [],
         },
         workbox: {
-          navigateFallbackDenylist: [/^\/api(\/|$)/],
+          navigateFallbackDenylist: [/^\/api(\/|$)/, /^\/mockServiceWorker\.js$/],
+          // The MSW worker (public/, dev mocks only) must never be precached or served by this SW.
+          globIgnores: ['**/mockServiceWorker.js'],
         },
       }),
     ],
