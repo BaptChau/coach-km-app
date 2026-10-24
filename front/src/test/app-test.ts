@@ -70,3 +70,9 @@ export function mountInApp(
     attachTo: options.attach ? document.body : undefined,
   })
 }
+
+/**
+ * `vi.waitFor` options for a navigation: the first visit of a lazy route imports (and, under
+ * coverage, instruments) its view, which can exceed the default 1 s on a busy machine.
+ */
+export const ROUTE_WAIT = { timeout: 10_000 }

@@ -1,4 +1,7 @@
+// ESLint flat config (issue #13): Vue 3 recommended + TypeScript (type-aware) +
+// accessibility, Prettier owns formatting. `npm run lint` fails on any warning.
 import pluginVue from 'eslint-plugin-vue'
+import pluginVueA11y from 'eslint-plugin-vuejs-accessibility'
 import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescript'
 import skipFormatting from '@vue/eslint-config-prettier/skip-formatting'
 
@@ -19,6 +22,71 @@ export default defineConfigWithVueTs(
     ],
   },
   pluginVue.configs['flat/recommended'],
-  vueTsConfigs.recommended,
+  vueTsConfigs.recommendedTypeChecked,
+  pluginVueA11y.configs['flat/recommended'],
+  {
+    name: 'app/rules',
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' },
+      ],
+      'vue/block-lang': ['error', { script: { lang: 'ts' } }],
+      'vue/component-api-style': ['error', ['script-setup']],
+      'vue/no-unused-refs': 'error',
+      'vue/no-useless-v-bind': 'error',
+      'vue/require-typed-ref': 'error',
+      // `'' as string | null` widens a reactive() field on purpose: not an unneeded assertion.
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      // `IsoDate | Timestamp` (both strings) documents what a function accepts.
+      '@typescript-eslint/no-duplicate-type-constituents': 'off',
+    },
+  },
+  {
+    // Typed linting does not resolve `.vue` imports (they type as `any` there, unlike vue-tsc):
+    // `InstanceType<typeof Dialog> | null` would be reported as a redundant union.
+    name: 'app/vue-sfc',
+    files: ['**/*.vue'],
+    rules: {
+      '@typescript-eslint/no-redundant-type-constituents': 'off',
+    },
+  },
+  {
+    // Tooling configs are outside the app's tsconfig: lint them without type information.
+    name: 'app/config-files',
+    files: ['*.config.ts'],
+    extends: [vueTsConfigs.disableTypeChecked],
+    languageOptions: { parserOptions: { projectService: false } },
+  },
+  {
+    // Route views are named after their route ("HomeView"); single-word files are fine there.
+    name: 'app/views',
+    files: ['src/views/**/*.vue', 'src/layouts/**/*.vue', 'src/App.vue'],
+    rules: {
+      'vue/multi-word-component-names': 'off',
+    },
+  },
+  {
+    // Specs drive mocks (`vi.mocked(...)`) whose types are deliberately loose.
+    name: 'app/tests',
+    files: ['src/**/*.spec.ts', 'src/test/**/*.ts'],
+    rules: {
+      // Mock implementations are often `async () => value`.
+      '@typescript-eslint/require-await': 'off',
+      // Specs define small host components inline.
+      'vue/one-component-per-file': 'off',
+      '@typescript-eslint/unbound-method': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+    },
+  },
   skipFormatting,
 )

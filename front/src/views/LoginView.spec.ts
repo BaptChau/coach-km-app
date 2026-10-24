@@ -3,7 +3,7 @@ import * as api from '@/api'
 import { flushPromises } from '@vue/test-utils'
 import { useTripsStore } from '@/stores/trips'
 import { httpError } from '@/test/api-mock'
-import { coachUser, freshPinia, mountInApp, testRouter } from '@/test/app-test'
+import { coachUser, freshPinia, mountInApp, testRouter, ROUTE_WAIT } from '@/test/app-test'
 import LoginView from './LoginView.vue'
 
 vi.mock('@/api', async (orig) => (await import('@/test/api-mock')).mockApi(await orig()))
@@ -40,14 +40,14 @@ describe('LoginView', () => {
 
     expect(api.auth.login).toHaveBeenCalledWith({ email: 'coach@club.fr', password: 'password1' })
     expect(flush).toHaveBeenCalledTimes(1)
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/trajets'))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/trajets'), ROUTE_WAIT)
   })
 
   it('goes to Accueil without ?redirect', async () => {
     vi.mocked(api.auth.login).mockResolvedValue({ token: 'jwt', coach: coachUser })
     const { wrapper, router } = await render('/login')
     await fillAndSubmit(wrapper)
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/'))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/'), ROUTE_WAIT)
   })
 
   it('stays on the page with a French message on bad credentials', async () => {
