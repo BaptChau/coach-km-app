@@ -29,16 +29,25 @@ export function useOnline(options: UseOnlineOptions = {}) {
   const onOffline = () => {
     isOnline.value = false
   }
+  // Back to the app (issue #12): a phone often suspends the page in the background and can
+  // miss the `online` event (iOS). Re-read the state and flush when it is online.
+  const onVisibility = () => {
+    if (document.visibilityState !== 'visible') return
+    isOnline.value = navigator.onLine !== false
+    if (isOnline.value) flush()
+  }
 
   onMounted(() => {
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
+    document.addEventListener('visibilitychange', onVisibility)
     if (options.flushOnMount ?? true) flush()
   })
 
   onBeforeUnmount(() => {
     window.removeEventListener('online', onOnline)
     window.removeEventListener('offline', onOffline)
+    document.removeEventListener('visibilitychange', onVisibility)
   })
 
   return { isOnline, flush }

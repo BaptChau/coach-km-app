@@ -28,6 +28,7 @@ npm run dev        # http://localhost:5173
 | `npm run lint`       | ESLint (`lint:fix` to fix)                           |
 | `npm run format`     | Prettier write (`format:check` to check)             |
 | `npm run type-check` | `vue-tsc` on the app and on the Node config files    |
+| `npm run icons`      | Regenerate the PNG icons from `public/icons/*.svg`   |
 
 ## Environment variables
 
@@ -85,6 +86,26 @@ browser  →  /api/trips?year=2026  →  proxy  →  http://localhost:3000/trips
       try_files $uri $uri/ /index.html;    # SPA history fallback
   }
   ```
+
+## PWA (service worker, install, updates)
+
+The production build generates `dist/sw.js` and `dist/manifest.webmanifest` (`vite-plugin-pwa`, see
+`vite.config.ts`). The service worker is not active in `npm run dev`; test it with `npm run build && npm run preview`.
+
+- **App shell:** every built JS/CSS/HTML file and the icons are precached (cache-first); navigations fall back to
+  `index.html`, except `/api/*` and `/mockServiceWorker.js`.
+- **API GETs:** `NetworkFirst` (4 s timeout, then the cache; 80 entries, 7 days; only 200 responses) in the
+  `coach-km-api` cache. Never cached: `/api/export`, `/api/receipts/*`, `/api/auth/*`, requests without a token.
+  The cache key includes a hash of the `Authorization` header, so a response is only served back to the session
+  that fetched it, and logout deletes the cache (`src/plugins/pwa-cache.ts`). Mutations are never cached: offline,
+  they go to the trips store's queue.
+- **Static files outside the precache, fonts:** `StaleWhileRevalidate` (`coach-km-assets`).
+- **Updates:** a new version installs in the background and takes control; the open page switches to it on the
+  next in-app navigation (a full page load), so a form being filled in is never reloaded under the user
+  (`src/plugins/pwa.ts`).
+- **Install:** `src/components/pwa/InstallPrompt.vue` (Android/desktop install button, iOS "Partager → Sur
+  l'écran d'accueil" hint).
+- **Icons:** SVG sources in `public/icons/`; run `npm run icons` after changing them and commit the PNGs.
 
 ## Source layout
 

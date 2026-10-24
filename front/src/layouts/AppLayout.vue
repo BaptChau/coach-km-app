@@ -13,6 +13,7 @@ import AppBar from '@/components/layout/AppBar.vue'
 import BottomNav from '@/components/layout/BottomNav.vue'
 import NavDrawer from '@/components/layout/NavDrawer.vue'
 import OfflineBanner from '@/components/layout/OfflineBanner.vue'
+import InstallPrompt from '@/components/pwa/InstallPrompt.vue'
 
 // The one `useOnline()` of the app: `online` events and the mount (app start or right
 // after login) flush the offline queue.
@@ -27,6 +28,7 @@ const { isMobile, isRail } = useBreakpoint()
 
   <v-main>
     <div class="app-content" :class="{ 'app-content--mobile': isMobile }">
+      <InstallPrompt />
       <slot />
     </div>
   </v-main>
