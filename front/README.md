@@ -1,0 +1,87 @@
+# coach-km-app: front (Vue 3 PWA)
+
+Mobile-first PWA where coaches log the km they drive for the association. Read [`UX.md`](./UX.md)
+before working on any screen, and [`../api/API.md`](../api/API.md) for the API contract.
+
+Stack: Vue 3 (`<script setup>`) + TypeScript (strict) + Vite, Vuetify 3 (auto-imported by
+`vite-plugin-vuetify`), Pinia (+ `pinia-plugin-persistedstate`), Vue Router 4, Axios, `vite-plugin-pwa`.
+Tooling: ESLint (flat config) + Prettier, Vitest + `@vue/test-utils` + jsdom, MSW.
+
+## Setup
+
+Requires Node 22.13+ or 24+.
+
+```sh
+cd front
+npm install
+npm run dev        # http://localhost:5173
+```
+
+## Scripts
+
+| Script               | What it does                                         |
+| -------------------- | ---------------------------------------------------- |
+| `npm run dev`        | Vite dev server with HMR and the `/api` proxy        |
+| `npm run build`      | Type-check (`vue-tsc`) then production build (dist/) |
+| `npm run preview`    | Serve `dist/` locally (port 4173, same `/api` proxy) |
+| `npm run test`       | Run the Vitest suite once (`test:watch` to watch)    |
+| `npm run lint`       | ESLint (`lint:fix` to fix)                           |
+| `npm run format`     | Prettier write (`format:check` to check)             |
+| `npm run type-check` | `vue-tsc` on the app and on the Node config files    |
+
+## Environment variables
+
+| Variable            | Dev (`.env.development`) | Prod (`.env.production`) | Meaning                                    |
+| ------------------- | ------------------------ | ------------------------ | ------------------------------------------ |
+| `VITE_API_BASE_URL` | `/api`                   | `/api`                   | Same-origin prefix of every API call       |
+| `VITE_USE_MOCKS`    | `true`                   | `false`                  | Serve the API from the MSW mock layer      |
+| `API_PROXY_TARGET`  | `http://localhost:3000`  | (unused)                 | Where the dev/preview proxy sends `/api/*` |
+
+Override locally in `.env.development.local` (git-ignored), e.g. `VITE_USE_MOCKS=false` to hit the real Go API.
+Read the values through `src/config` (`config.apiBaseUrl`, `config.useMocks`), not `import.meta.env`.
+
+## Why `/api` and the proxy
+
+The Go API sends **no CORS headers**, and it is not changed for the front. So the browser must always call the
+API on the **same origin** as the app, under the `/api` prefix, and something in front strips the prefix:
+
+```
+browser  →  /api/trips?year=2026  →  proxy  →  http://localhost:3000/trips?year=2026
+```
+
+- **Dev / preview:** Vite does it (`server.proxy` and `preview.proxy` in `vite.config.ts`).
+- **Production:** the reverse proxy serving `dist/` must do the same. Example with nginx:
+
+  ```nginx
+  location /api/ {
+      proxy_pass http://127.0.0.1:3000/;   # trailing slash strips the /api prefix
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  }
+  location / {
+      try_files $uri $uri/ /index.html;    # SPA history fallback
+  }
+  ```
+
+## Source layout
+
+```
+src/
+  api/          Axios client + typed endpoints (issue #7)
+  types/        Types mirroring api/API.md (issue #7)
+  domain/       Pure helpers: barème, formatting (issues #7, #11)
+  mocks/        MSW handlers, enabled by VITE_USE_MOCKS (issue #8)
+  stores/       Pinia stores (issue #9)
+  router/       Routes + auth guard (issue #10)
+  composables/  Reusable composition functions (issue #10)
+  views/        Route-level screens, lazy loaded (issue #11)
+  components/   Shared components (issue #11)
+  config/       Typed runtime config from the env
+  plugins/      vuetify.ts: themes, fr locale, component defaults
+  styles/       settings.scss (Vuetify SASS vars), main.scss (globals)
+  test/         Vitest setup
+```
+
+Conventions: import with the `@/` alias (`@/stores/auth`), tests live next to the code as `*.spec.ts`.
+Vuetify themes are named `light` and `dark`; the default `system` follows `prefers-color-scheme`.
+`rounded="lg"` is 12 px (cards), `rounded="xl"` is 24 px (FAB).
