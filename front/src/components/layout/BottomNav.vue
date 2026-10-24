@@ -38,8 +38,11 @@ const route = useRoute()
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Share the width equally: the global `size: large` padding made 4 tabs wider than 360 px. */
 .bottom-nav__item {
-  min-width: 64px;
+  flex: 1 1 0;
+  min-width: 0 !important;
   min-height: 48px;
+  padding-inline: 4px !important;
 }
 </style>

@@ -18,6 +18,20 @@ textarea,
   font-size: max(16px, 1rem) !important;
 }
 
+// Sentence-case buttons: easier to read, and long French labels ("Télécharger mon reçu
+// fiscal") fit a 360 px screen. A block button may wrap rather than overflow.
+.v-btn {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.v-btn--block {
+  max-width: 100%;
+  .v-btn__content {
+    white-space: normal;
+    text-align: center;
+  }
+}
+
 // Money and km figures line up.
 .tabular-nums {
   font-variant-numeric: tabular-nums;

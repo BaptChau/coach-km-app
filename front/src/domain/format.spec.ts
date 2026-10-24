@@ -1,4 +1,14 @@
-import { formatDate, formatEuros, formatKm, formatShortDate, vehicleLabel } from './format'
+import {
+  formatDate,
+  formatDecimal,
+  formatEuros,
+  formatKm,
+  formatShortDate,
+  parseDecimal,
+  toCents,
+  todayIso,
+  vehicleLabel,
+} from './format'
 
 const NNBSP = ' ' // fr-FR thousands separator
 const NBSP = ' ' // before € and units
@@ -32,5 +42,24 @@ describe('fr-FR formatters', () => {
     expect(vehicleLabel({ type: 'moped', fiscalHorsepower: null, electric: false })).toBe(
       'Cyclomoteur',
     )
+  })
+})
+
+describe('parseDecimal / formatDecimal / todayIso', () => {
+  it('accepts a comma, a dot and spaces', () => {
+    expect(parseDecimal('32,5')).toBe(32.5)
+    expect(parseDecimal('32.5')).toBe(32.5)
+    expect(parseDecimal(' 1 234,5 ')).toBe(1234.5)
+    expect(parseDecimal('12')).toBe(12)
+    expect(parseDecimal('')).toBeNull()
+    expect(parseDecimal('abc')).toBeNull()
+    expect(parseDecimal('1,2,3')).toBeNull()
+    expect(parseDecimal('-3')).toBeNull()
+  })
+
+  it('formats without unit and gives a local date', () => {
+    expect(formatDecimal(32.5)).toBe('32,5')
+    expect(todayIso(new Date(2026, 3, 9, 23, 30))).toBe('2026-04-09')
+    expect(toCents(20.67)).toBe(2067)
   })
 })
