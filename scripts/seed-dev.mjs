@@ -6,6 +6,9 @@
 //   node scripts/seed-dev.mjs                 # Docker stack (http://localhost:$HTTP_PORT/api)
 //   node scripts/seed-dev.mjs --target local  # `go run ./cmd/server` on http://localhost:3000
 //
+// The Docker dev stack (compose.dev.yaml) runs it by itself on every start of
+// the API container, with `--target container`.
+//
 // Options (environment):
 //   SEED_API_URL  base URL of the API, overrides the target's default
 //   HTTP_PORT     port of the Docker stack (default 8080, read from .env too)
@@ -136,8 +139,8 @@ const ACCOUNTS = [
 const target = process.argv.includes('--target')
   ? process.argv[process.argv.indexOf('--target') + 1]
   : 'docker'
-if (!['docker', 'local'].includes(target)) {
-  fail(`unknown --target "${target}" (docker or local)`)
+if (!['docker', 'local', 'container'].includes(target)) {
+  fail(`unknown --target "${target}" (docker, local or container)`)
 }
 
 function dotenv(key) {
@@ -149,11 +152,13 @@ function dotenv(key) {
   return line?.slice(key.length + 1).trim() || undefined
 }
 
-const API =
-  process.env.SEED_API_URL ??
-  (target === 'docker'
-    ? `http://localhost:${process.env.HTTP_PORT ?? dotenv('HTTP_PORT') ?? 8080}/api`
-    : 'http://localhost:3000')
+const DEFAULT_API = {
+  docker: `http://localhost:${process.env.HTTP_PORT ?? dotenv('HTTP_PORT') ?? 8080}/api`,
+  local: 'http://localhost:3000',
+  // Inside the API container (dev image): the server itself, no nginx.
+  container: `http://127.0.0.1:${process.env.PORT ?? 3000}`,
+}
+const API = process.env.SEED_API_URL ?? DEFAULT_API[target]
 
 // ---- HTTP ------------------------------------------------------------------
 
@@ -264,16 +269,18 @@ async function seedTrips(token, a, rows, year, vehicles, today) {
 }
 
 function promoteToPresident(email) {
-  const args =
-    target === 'docker'
-      ? ['docker', ['compose', 'exec', '-T', 'api', '/app/admin', 'set-role', email, 'president'], ROOT]
-      : [
-          'go',
-          ['run', './cmd/admin', 'set-role', email, 'president'],
-          join(ROOT, 'api'),
-          { DB_PATH: process.env.DB_PATH ?? './dev.db' },
-        ]
-  const [cmd, argv, cwd, env] = args
+  const commands = {
+    docker: ['docker', ['compose', 'exec', '-T', 'api', '/app/admin', 'set-role', email, 'president'], ROOT],
+    local: [
+      'go',
+      ['run', './cmd/admin', 'set-role', email, 'president'],
+      join(ROOT, 'api'),
+      { DB_PATH: process.env.DB_PATH ?? './dev.db' },
+    ],
+    // The container's own DB_PATH points at the server's database.
+    container: ['/app/admin', ['set-role', email, 'president'], '/app'],
+  }
+  const [cmd, argv, cwd, env] = commands[target]
   try {
     execFileSync(cmd, argv, { cwd, env: { ...process.env, ...env }, stdio: 'pipe' })
     return true

@@ -23,14 +23,27 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
-Open http://localhost:8080 (or the `HTTP_PORT` you set). For development, fill it with dummy data
-(four accounts, password `password1`, see the root [README](../README.md#development-data)):
+Open http://localhost:8080 (or the `HTTP_PORT` you set).
 
-```bash
-node scripts/seed-dev.mjs
-```
+## Development and production modes
 
-Otherwise, register an account, then make it the president:
+`.env.example` contains `COMPOSE_FILE=compose.yaml:compose.dev.yaml`, so a copy of it runs in
+**development mode**:
+
+- The API image is built with the `dev` target. Its database lives in the container's tmpfs, and at
+  every start the container wipes it, starts the server and runs `scripts/seed-dev.mjs`.
+- **Every `docker compose up --build -d` resets the database to the dummy data**: four accounts with
+  the password `password1` (see the root [README](../README.md#development-data)). The small
+  `reset-trigger` service is rebuilt without cache each time, which makes Compose restart the API.
+  It takes about 10 s.
+- A plain `docker compose up -d` keeps the data, and so does editing trips in the app; a
+  `docker compose restart api` resets it.
+- A placeholder `ASSOCIATION_OBJECT` is used when `.env` leaves it empty, so the seeded tax receipt
+  can be issued.
+
+**Production mode: delete the `COMPOSE_FILE` line from `.env`.** The API then uses the `prod`
+target (no Node, no seed script), stores its database in the persistent `api-data` volume, and
+starts empty. Register an account, then make it the president:
 
 ```bash
 docker compose exec api /app/admin set-role <email> president
@@ -41,11 +54,11 @@ Useful commands:
 ```bash
 docker compose ps                 # both services should be "healthy"
 docker compose logs -f web api    # access log + API request log
-docker compose up --build -d      # deploy a new version (data is kept in the volume)
+docker compose up --build -d      # deploy a new version (production: data is kept in the volume)
 docker compose down               # stop (add -v to DELETE the database volume)
 ```
 
-### Backup
+### Backup (production mode)
 
 SQLite runs in WAL mode; use its online backup rather than copying the file:
 

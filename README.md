@@ -16,10 +16,15 @@ receipt (Cerfa 11580) issued by the club president.
 ```bash
 cp .env.example .env              # set JWT_SECRET: openssl rand -base64 48
 docker compose up --build -d
-node scripts/seed-dev.mjs         # optional: dummy data (see below)
 ```
 
-Open http://localhost:8080 (or the `HTTP_PORT` set in `.env`). Details and the security setup are in
+Open http://localhost:8080 (or the `HTTP_PORT` set in `.env`) and log in with one of the
+[development accounts](#development-data), password `password1`.
+
+With the `.env.example` settings the stack runs in **development mode** (`COMPOSE_FILE` adds `compose.dev.yaml`):
+**every `docker compose up --build -d` resets the database and fills it with the dummy data.** A plain
+`docker compose up -d` (no `--build`) keeps it. For production, delete the `COMPOSE_FILE` line from `.env`: the
+database then lives in a persistent volume and nothing is seeded. Details and the security setup are in
 [docker/README.md](docker/README.md).
 
 ### For development
@@ -43,13 +48,19 @@ Two options for the front:
 
 ## Development data
 
-`scripts/seed-dev.mjs` (Node 22+, no dependencies) fills an empty development API with dummy data **through the
-API**, then sets the president role with the admin CLI. It is safe to run again: nothing is duplicated.
+`scripts/seed-dev.mjs` (Node 22+, no dependencies) fills a development API with dummy data **through the API**,
+then sets the president role with the admin CLI. It is safe to run again: nothing is duplicated.
 
-```bash
-node scripts/seed-dev.mjs                  # Docker stack: http://localhost:$HTTP_PORT/api
-node scripts/seed-dev.mjs --target local   # go run ./cmd/server: http://localhost:3000
-```
+- **Docker (development mode):** nothing to do. The API container runs it at start-up on an empty database, so
+  every `docker compose up --build -d` gives a fresh copy of this data.
+- **Local API (`go run`):** run it yourself, once the API is up:
+
+  ```bash
+  node scripts/seed-dev.mjs --target local   # http://localhost:3000, database api/dev.db
+  ```
+
+- To add the data to a Docker stack started **without** development mode:
+  `node scripts/seed-dev.mjs` (through nginx, `http://localhost:$HTTP_PORT/api`).
 
 Every account uses the password **`password1`**:
 
@@ -72,9 +83,12 @@ Options:
 Notes:
 
 - **The tax receipt is issued only when the association details are complete**, `ASSOCIATION_OBJECT` included.
-  Otherwise the script prints a warning; fill them in (`.env` for Docker, environment variables for
+  Docker development mode sets a placeholder `ASSOCIATION_OBJECT` when `.env` leaves it empty. Otherwise the
+  script prints a warning; fill them in (`.env` for Docker, environment variables for
   `go run`) and run it again.
-- Through nginx, login is limited to 10 per minute. The script waits and retries, so a run can take about 30 s.
+- When the script goes through nginx (manual Docker run), login is limited to 10 per minute: it waits and
+  retries, so a run can take about 30 s. Inside the dev container it talks to the API directly and takes a second.
 - **Never run it against production:** it creates accounts with a known password.
 
-To start again from an empty database: `docker compose down -v` (Docker) or `rm api/dev.db*` (local).
+To start again from fresh data: `docker compose up --build -d` (Docker, development mode) or
+`rm api/dev.db*`, restart the API and rerun the script (local).

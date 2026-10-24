@@ -1,6 +1,8 @@
 # coach-km-app: the Go API behind nginx, which serves the PWA and is the only
 # published entry point. Quick start: cp .env.example .env, set JWT_SECRET,
 # then `docker compose up --build -d`. See docker/README.md.
+# This file alone is the production setup; .env.example also adds
+# compose.dev.yaml (development mode: fresh dummy data on every build).
 
 name: coach-km
 
