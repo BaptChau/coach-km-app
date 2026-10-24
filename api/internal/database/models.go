@@ -8,10 +8,15 @@ import (
 	"time"
 )
 
-type Rate struct {
-	Year          int64  `json:"year"`
-	VehicleType   string `json:"vehicleType"`
-	MilliEurPerKm int64  `json:"milliEurPerKm"`
+type TaxReceipt struct {
+	ID          int64     `json:"id"`
+	Year        int64     `json:"year"`
+	Seq         int64     `json:"seq"`
+	UserID      int64     `json:"userId"`
+	AmountCents int64     `json:"amountCents"`
+	WaivedAt    time.Time `json:"waivedAt"`
+	IssuedBy    int64     `json:"issuedBy"`
+	IssuedAt    time.Time `json:"issuedAt"`
 }
 
 type Trip struct {
@@ -35,6 +40,10 @@ type User struct {
 	FirstName          string    `json:"firstName"`
 	LastName           string    `json:"lastName"`
 	PasswordHash       string    `json:"passwordHash"`
+	Role               string    `json:"role"`
+	AddressLine        string    `json:"addressLine"`
+	PostalCode         string    `json:"postalCode"`
+	City               string    `json:"city"`
 	CreatedAt          time.Time `json:"createdAt"`
 }
 
@@ -43,5 +52,15 @@ type Vehicle struct {
 	UserID    int64     `json:"userId"`
 	Label     string    `json:"label"`
 	Type      string    `json:"type"`
+	FiscalHp  *int64    `json:"fiscalHp"`
+	Electric  bool      `json:"electric"`
 	CreatedAt time.Time `json:"createdAt"`
+}
+
+type Waiver struct {
+	UserID      int64     `json:"userId"`
+	Year        int64     `json:"year"`
+	Km          float64   `json:"km"`
+	AmountCents int64     `json:"amountCents"`
+	WaivedAt    time.Time `json:"waivedAt"`
 }

@@ -10,25 +10,35 @@ import (
 )
 
 const createVehicle = `-- name: CreateVehicle :one
-INSERT INTO vehicles (user_id, label, type)
-VALUES (?, ?, ?)
-RETURNING id, user_id, label, type, created_at
+INSERT INTO vehicles (user_id, label, type, fiscal_hp, electric)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id, user_id, label, type, fiscal_hp, electric, created_at
 `
 
 type CreateVehicleParams struct {
-	UserID int64  `json:"userId"`
-	Label  string `json:"label"`
-	Type   string `json:"type"`
+	UserID   int64  `json:"userId"`
+	Label    string `json:"label"`
+	Type     string `json:"type"`
+	FiscalHp *int64 `json:"fiscalHp"`
+	Electric bool   `json:"electric"`
 }
 
 func (q *Queries) CreateVehicle(ctx context.Context, arg CreateVehicleParams) (Vehicle, error) {
-	row := q.db.QueryRowContext(ctx, createVehicle, arg.UserID, arg.Label, arg.Type)
+	row := q.db.QueryRowContext(ctx, createVehicle,
+		arg.UserID,
+		arg.Label,
+		arg.Type,
+		arg.FiscalHp,
+		arg.Electric,
+	)
 	var i Vehicle
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
 		&i.Label,
 		&i.Type,
+		&i.FiscalHp,
+		&i.Electric,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -53,7 +63,7 @@ func (q *Queries) DeleteVehicle(ctx context.Context, arg DeleteVehicleParams) (i
 }
 
 const getVehicle = `-- name: GetVehicle :one
-SELECT id, user_id, label, type, created_at FROM vehicles
+SELECT id, user_id, label, type, fiscal_hp, electric, created_at FROM vehicles
 WHERE id = ? AND user_id = ?
 LIMIT 1
 `
@@ -71,30 +81,15 @@ func (q *Queries) GetVehicle(ctx context.Context, arg GetVehicleParams) (Vehicle
 		&i.UserID,
 		&i.Label,
 		&i.Type,
+		&i.FiscalHp,
+		&i.Electric,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const getVehicleType = `-- name: GetVehicleType :one
-SELECT type FROM vehicles
-WHERE id = ? AND user_id = ?
-`
-
-type GetVehicleTypeParams struct {
-	ID     int64 `json:"id"`
-	UserID int64 `json:"userId"`
-}
-
-func (q *Queries) GetVehicleType(ctx context.Context, arg GetVehicleTypeParams) (string, error) {
-	row := q.db.QueryRowContext(ctx, getVehicleType, arg.ID, arg.UserID)
-	var type_ string
-	err := row.Scan(&type_)
-	return type_, err
-}
-
 const listVehiclesByUser = `-- name: ListVehiclesByUser :many
-SELECT id, user_id, label, type, created_at FROM vehicles
+SELECT id, user_id, label, type, fiscal_hp, electric, created_at FROM vehicles
 WHERE user_id = ?
 ORDER BY id
 `
@@ -113,6 +108,8 @@ func (q *Queries) ListVehiclesByUser(ctx context.Context, userID int64) ([]Vehic
 			&i.UserID,
 			&i.Label,
 			&i.Type,
+			&i.FiscalHp,
+			&i.Electric,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -130,22 +127,26 @@ func (q *Queries) ListVehiclesByUser(ctx context.Context, userID int64) ([]Vehic
 
 const updateVehicle = `-- name: UpdateVehicle :one
 UPDATE vehicles
-SET label = ?, type = ?
+SET label = ?, type = ?, fiscal_hp = ?, electric = ?
 WHERE id = ? AND user_id = ?
-RETURNING id, user_id, label, type, created_at
+RETURNING id, user_id, label, type, fiscal_hp, electric, created_at
 `
 
 type UpdateVehicleParams struct {
-	Label  string `json:"label"`
-	Type   string `json:"type"`
-	ID     int64  `json:"id"`
-	UserID int64  `json:"userId"`
+	Label    string `json:"label"`
+	Type     string `json:"type"`
+	FiscalHp *int64 `json:"fiscalHp"`
+	Electric bool   `json:"electric"`
+	ID       int64  `json:"id"`
+	UserID   int64  `json:"userId"`
 }
 
 func (q *Queries) UpdateVehicle(ctx context.Context, arg UpdateVehicleParams) (Vehicle, error) {
 	row := q.db.QueryRowContext(ctx, updateVehicle,
 		arg.Label,
 		arg.Type,
+		arg.FiscalHp,
+		arg.Electric,
 		arg.ID,
 		arg.UserID,
 	)
@@ -155,6 +156,8 @@ func (q *Queries) UpdateVehicle(ctx context.Context, arg UpdateVehicleParams) (V
 		&i.UserID,
 		&i.Label,
 		&i.Type,
+		&i.FiscalHp,
+		&i.Electric,
 		&i.CreatedAt,
 	)
 	return i, err

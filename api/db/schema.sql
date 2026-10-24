@@ -5,6 +5,12 @@ CREATE TABLE IF NOT EXISTS users (
     first_name          TEXT NOT NULL,
     last_name           TEXT NOT NULL,
     password_hash       TEXT NOT NULL,
+    -- 'president' can issue Cerfa 11580 tax receipts for every coach.
+    role                TEXT NOT NULL DEFAULT 'coach' CHECK (role IN ('coach', 'president')),
+    -- Postal address, printed on the tax receipt.
+    address_line        TEXT NOT NULL DEFAULT '',
+    postal_code         TEXT NOT NULL DEFAULT '',
+    city                TEXT NOT NULL DEFAULT '',
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -12,7 +18,10 @@ CREATE TABLE IF NOT EXISTS vehicles (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     label      TEXT NOT NULL,
-    type       TEXT NOT NULL CHECK (type IN ('car', 'two_wheeler')),
+    type       TEXT NOT NULL CHECK (type IN ('car', 'motorcycle', 'moped')),
+    -- Puissance administrative (CV); NULL for mopeds, whose barème has none.
+    fiscal_hp  INTEGER CHECK (fiscal_hp IS NULL OR fiscal_hp > 0),
+    electric   BOOLEAN NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- Lets trips reference (id, user_id) so a trip can only use its owner's vehicle.
     UNIQUE (id, user_id)
@@ -43,16 +52,29 @@ CREATE TABLE IF NOT EXISTS trips (
 CREATE INDEX IF NOT EXISTS idx_trips_user_date ON trips (user_id, date DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_trips_vehicle ON trips (vehicle_id, user_id);
 
--- Barème kilométrique bénévoles, in thousandths of a euro per km
--- (0.331 €/km = 331). A year without a row falls back to the latest
--- earlier year, flagged as provisional.
-CREATE TABLE IF NOT EXISTS rates (
-    year           INTEGER NOT NULL,
-    vehicle_type   TEXT NOT NULL CHECK (vehicle_type IN ('car', 'two_wheeler')),
-    milli_eur_per_km INTEGER NOT NULL CHECK (milli_eur_per_km > 0),
-    PRIMARY KEY (year, vehicle_type)
+-- A coach's written renunciation of reimbursement for a year (abandon de
+-- frais). It locks that year's trips: the waived amount must not drift.
+CREATE TABLE IF NOT EXISTS waivers (
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    year         INTEGER NOT NULL,
+    km           REAL NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    waived_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, year)
 );
 
-INSERT OR IGNORE INTO rates (year, vehicle_type, milli_eur_per_km) VALUES
-    (2023, 'car', 331),
-    (2023, 'two_wheeler', 128);
+-- Cerfa 11580 receipts issued by the president. Immutable once issued; the
+-- amount is copied from the waiver.
+CREATE TABLE IF NOT EXISTS tax_receipts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    year         INTEGER NOT NULL,
+    seq          INTEGER NOT NULL,
+    user_id      INTEGER NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    waived_at    DATETIME NOT NULL,
+    issued_by    INTEGER NOT NULL REFERENCES users(id),
+    issued_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id, year) REFERENCES waivers (user_id, year) ON DELETE RESTRICT,
+    UNIQUE (year, seq),
+    UNIQUE (user_id, year)
+);

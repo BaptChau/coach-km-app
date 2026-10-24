@@ -14,7 +14,6 @@ import (
 	"github.com/BaptChau/coach-km-app/api/internal/config"
 	"github.com/BaptChau/coach-km-app/api/internal/database"
 	"github.com/BaptChau/coach-km-app/api/internal/external"
-	"github.com/BaptChau/coach-km-app/api/internal/rates"
 	"github.com/BaptChau/coach-km-app/api/internal/server"
 )
 
@@ -40,18 +39,13 @@ func run() error {
 	}
 	defer db.Close()
 
-	rateTable, err := rates.Load(ctx, database.New(db.Read))
-	if err != nil {
-		return err
-	}
-
 	srv := &http.Server{
 		Addr: net.JoinHostPort("", cfg.Port),
 		Handler: server.New(server.Deps{
 			DB:                 db,
 			JWTSecret:          cfg.JWTSecret,
 			RegistrationNumber: cfg.RegistrationNumber,
-			Rates:              rateTable,
+			Association:        cfg.Association,
 			External:           external.NewClient(cfg.ExternalDemoURL),
 		}),
 		// Bound every phase of a request so slow or idle clients can't pin

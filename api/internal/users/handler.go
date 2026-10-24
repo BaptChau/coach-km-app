@@ -3,6 +3,7 @@ package users
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/mail"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 )
 
 type Handler struct {
+	db                 *database.DB
 	reads              *database.Queries
 	writes             *database.Queries
 	jwtSecret          string
@@ -24,6 +26,7 @@ type Handler struct {
 
 func NewHandler(db *database.DB, jwtSecret string, registrationNumber *regexp.Regexp) *Handler {
 	return &Handler{
+		db:                 db,
 		reads:              database.New(db.Read),
 		writes:             database.New(db.Write),
 		jwtSecret:          jwtSecret,
@@ -35,6 +38,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/register", h.register)
 	mux.HandleFunc("POST /auth/login", h.login)
 	mux.HandleFunc("GET /auth/me", auth.RequireAuth(h.jwtSecret, h.me))
+	mux.HandleFunc("PATCH /auth/me", auth.RequireAuth(h.jwtSecret, h.updateMe))
 }
 
 type registerInput struct {
@@ -56,8 +60,19 @@ type Coach struct {
 	RegistrationNumber string    `json:"registrationNumber"`
 	FirstName          string    `json:"firstName"`
 	LastName           string    `json:"lastName"`
+	Role               string    `json:"role"`
+	Address            Address   `json:"address"`
 	CreatedAt          time.Time `json:"createdAt"`
 }
+
+type Address struct {
+	Line       string `json:"line"`
+	PostalCode string `json:"postalCode"`
+	City       string `json:"city"`
+}
+
+// Complete reports whether the address can go on a tax receipt.
+func (a Address) Complete() bool { return a.Line != "" && a.PostalCode != "" && a.City != "" }
 
 // ToCoach is the public view of a user: never includes the password hash.
 func ToCoach(u database.User) Coach {
@@ -67,6 +82,8 @@ func ToCoach(u database.User) Coach {
 		RegistrationNumber: u.RegistrationNumber,
 		FirstName:          u.FirstName,
 		LastName:           u.LastName,
+		Role:               u.Role,
+		Address:            Address{Line: u.AddressLine, PostalCode: u.PostalCode, City: u.City},
 		CreatedAt:          u.CreatedAt,
 	}
 }
@@ -183,6 +200,76 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]Coach{"coach": ToCoach(user)})
+}
+
+type profileInput struct {
+	FirstName *string `json:"firstName"`
+	LastName  *string `json:"lastName"`
+	Address   *struct {
+		Line       *string `json:"line"`
+		PostalCode *string `json:"postalCode"`
+		City       *string `json:"city"`
+	} `json:"address"`
+}
+
+func (h *Handler) updateMe(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserID(r)
+	var in profileInput
+	if err := httpx.ReadJSON(w, r, &in); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var (
+		updated database.User
+		msg     string
+	)
+	err := h.db.WriteTx(r.Context(), func(q *database.Queries) error {
+		u, err := q.GetUserByID(r.Context(), userID)
+		if err != nil {
+			return err
+		}
+		set := func(dst *string, src *string, name string, maxLen int, required bool) {
+			if src == nil || msg != "" {
+				return
+			}
+			v := strings.TrimSpace(*src)
+			if n := utf8.RuneCountInString(v); n > maxLen || (required && n == 0) {
+				msg = fmt.Sprintf("%s must be at most %d characters", name, maxLen)
+				if required {
+					msg = fmt.Sprintf("%s is required (max %d characters)", name, maxLen)
+				}
+				return
+			}
+			*dst = v
+		}
+		set(&u.FirstName, in.FirstName, "firstName", 100, true)
+		set(&u.LastName, in.LastName, "lastName", 100, true)
+		if in.Address != nil {
+			set(&u.AddressLine, in.Address.Line, "address.line", 200, false)
+			set(&u.PostalCode, in.Address.PostalCode, "address.postalCode", 10, false)
+			set(&u.City, in.Address.City, "address.city", 100, false)
+		}
+		if msg != "" {
+			return nil
+		}
+		updated, err = q.UpdateProfile(r.Context(), database.UpdateProfileParams{
+			FirstName: u.FirstName, LastName: u.LastName,
+			AddressLine: u.AddressLine, PostalCode: u.PostalCode, City: u.City,
+			ID: userID,
+		})
+		return err
+	})
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		httpx.Error(w, http.StatusUnauthorized, "account not found")
+	case err != nil:
+		httpx.Internal(w, r, err)
+	case msg != "":
+		httpx.Error(w, http.StatusBadRequest, msg)
+	default:
+		httpx.WriteJSON(w, http.StatusOK, map[string]Coach{"coach": ToCoach(updated)})
+	}
 }
 
 func (h *Handler) writeAuth(w http.ResponseWriter, r *http.Request, status int, user database.User) {
