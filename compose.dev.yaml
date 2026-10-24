@@ -1,0 +1,45 @@
+# Development override, merged with compose.yaml when .env contains
+#   COMPOSE_FILE=compose.yaml:compose.dev.yaml
+# (as in .env.example). Every start of the API container (each
+# `docker compose up --build -d` that rebuilds or changes it, or a restart)
+# begins with an EMPTY database filled with dummy data (scripts/seed-dev.mjs).
+# Never use it in production: remove COMPOSE_FILE from .env there.
+
+services:
+  api:
+    build:
+      target: dev
+      additional_contexts:
+        seed: ./scripts
+        devtools: ./docker/dev
+    image: coach-km-api:dev
+    environment:
+      # In the container's tmpfs: wiped whenever the container stops.
+      DB_PATH: /tmp/coach-km.db
+      # Placeholder so the seeded tax receipt can be issued; .env wins if set.
+      ASSOCIATION_OBJECT: ${ASSOCIATION_OBJECT:-Pratique et promotion du handball (valeur de développement)}
+    volumes: !reset []
+    healthcheck:
+      start_period: 30s
+    depends_on:
+      reset-trigger:
+        condition: service_completed_successfully
+        restart: true
+
+  # Tiny one-shot, rebuilt without cache on every `--build`, so it gets a new
+  # image and is recreated each time; `restart: true` above then restarts the
+  # API. Result: each `docker compose up --build -d` starts from a fresh,
+  # seeded database. A plain `docker compose up -d` keeps the data.
+  reset-trigger:
+    build:
+      dockerfile_inline: |
+        FROM busybox:1.37
+        RUN date > /built-at
+      no_cache: true
+    image: coach-km-reset-trigger:dev
+    command: ["true"]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
