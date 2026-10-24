@@ -27,7 +27,7 @@ export function useYearData() {
     (y) => {
       trips.loadYear(y).catch(ignore)
       summary.load(y).catch(ignore)
-      rates.load(y)
+      void rates.load(y) // never rejects: falls back to the bundled barème
     },
     { immediate: true },
   )
