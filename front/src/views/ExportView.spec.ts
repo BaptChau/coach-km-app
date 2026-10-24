@@ -2,7 +2,7 @@
 import * as api from '@/api'
 import { DOMWrapper, flushPromises } from '@vue/test-utils'
 import { useUiStore } from '@/stores/ui'
-import { coachUser, freshPinia, mountInApp, signIn, testRouter } from '@/test/app-test'
+import { coachUser, freshPinia, mountInApp, signIn, testRouter, ROUTE_WAIT } from '@/test/app-test'
 import type { Coach, Summary, Waiver } from '@/types'
 import ExportView from './ExportView.vue'
 
@@ -77,7 +77,10 @@ describe('ExportView', () => {
     expect(wrapper.find('[data-testid="waiver-address"]').text()).toContain('adresse postale')
     expect(wrapper.find('[data-testid="waiver-start"]').exists()).toBe(false)
     await wrapper.find('[data-testid="waiver-to-profile"]').trigger('click')
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/profil?retour=export'))
+    await vi.waitFor(
+      () => expect(router.currentRoute.value.fullPath).toBe('/profil?retour=export'),
+      ROUTE_WAIT,
+    )
   })
 
   it('waives after a confirmation that warns about the locked trips', async () => {

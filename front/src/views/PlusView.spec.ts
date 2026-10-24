@@ -8,6 +8,7 @@ import {
   presidentUser,
   signIn,
   testRouter,
+  ROUTE_WAIT,
 } from '@/test/app-test'
 import type { Coach } from '@/types'
 import PlusView from './PlusView.vue'
@@ -42,6 +43,6 @@ describe('PlusView', () => {
     const { wrapper, router } = await render(coachUser)
     await wrapper.find('[data-testid="logout"]').trigger('click')
     expect(useAuthStore().isAuthenticated).toBe(false)
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/login'))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/login'), ROUTE_WAIT)
   })
 })

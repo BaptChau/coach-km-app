@@ -4,7 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { httpError } from '@/test/api-mock'
-import { coachUser, freshPinia, mountInApp, signIn, testRouter } from '@/test/app-test'
+import { coachUser, freshPinia, mountInApp, signIn, testRouter, ROUTE_WAIT } from '@/test/app-test'
 import type { Coach, ProfilePatch } from '@/types'
 import ProfileView from './ProfileView.vue'
 
@@ -88,7 +88,7 @@ describe('ProfileView', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(api.auth.updateMe).toHaveBeenCalledOnce()
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('export'))
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('export'), ROUTE_WAIT)
   })
 
   it('shows an API address error in French and keeps the input', async () => {

@@ -3,7 +3,7 @@ import * as api from '@/api'
 import { flushPromises } from '@vue/test-utils'
 import { useTripsStore } from '@/stores/trips'
 import { httpError, networkError } from '@/test/api-mock'
-import { coachUser, freshPinia, mountInApp, testRouter } from '@/test/app-test'
+import { coachUser, freshPinia, mountInApp, testRouter, ROUTE_WAIT } from '@/test/app-test'
 import RegisterView from './RegisterView.vue'
 
 vi.mock('@/api', async (orig) => (await import('@/test/api-mock')).mockApi(await orig()))
@@ -63,7 +63,7 @@ describe('RegisterView', () => {
       password: 'motdepasse',
     })
     expect(flush).toHaveBeenCalledOnce()
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/trajets'))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/trajets'), ROUTE_WAIT)
   })
 
   it('refuses a malformed licence number without calling the API', async () => {
