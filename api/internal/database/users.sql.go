@@ -7,61 +7,58 @@ package database
 
 import (
 	"context"
-	"time"
 )
 
-const createTrip = `-- name: CreateTrip :one
-INSERT INTO trips (user_id, date, origin, destination, distance_km)
+const createUser = `-- name: CreateUser :one
+INSERT INTO users (email, registration_number, first_name, last_name, password_hash)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, user_id, date, origin, destination, distance_km, created_at
+RETURNING id, email, registration_number, first_name, last_name, password_hash, created_at
 `
 
-type CreateTripParams struct {
-	UserID      int64     `json:"user_id"`
-	Date        time.Time `json:"date"`
-	Origin      string    `json:"origin"`
-	Destination string    `json:"destination"`
-	DistanceKm  float64   `json:"distance_km"`
+type CreateUserParams struct {
+	Email              string `json:"email"`
+	RegistrationNumber string `json:"registrationNumber"`
+	FirstName          string `json:"firstName"`
+	LastName           string `json:"lastName"`
+	PasswordHash       string `json:"passwordHash"`
 }
 
-func (q *Queries) CreateTrip(ctx context.Context, arg CreateTripParams) (Trip, error) {
-	row := q.db.QueryRowContext(ctx, createTrip,
-		arg.UserID,
-		arg.Date,
-		arg.Origin,
-		arg.Destination,
-		arg.DistanceKm,
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, createUser,
+		arg.Email,
+		arg.RegistrationNumber,
+		arg.FirstName,
+		arg.LastName,
+		arg.PasswordHash,
 	)
-	var i Trip
+	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.UserID,
-		&i.Date,
-		&i.Origin,
-		&i.Destination,
-		&i.DistanceKm,
+		&i.Email,
+		&i.RegistrationNumber,
+		&i.FirstName,
+		&i.LastName,
+		&i.PasswordHash,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const createUser = `-- name: CreateUser :one
-INSERT INTO users (username, password_hash)
-VALUES (?, ?)
-RETURNING id, username, password_hash, created_at
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, email, registration_number, first_name, last_name, password_hash, created_at FROM users
+WHERE email = ?
+LIMIT 1
 `
 
-type CreateUserParams struct {
-	Username     string `json:"username"`
-	PasswordHash string `json:"password_hash"`
-}
-
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, createUser, arg.Username, arg.PasswordHash)
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
+		&i.Email,
+		&i.RegistrationNumber,
+		&i.FirstName,
+		&i.LastName,
 		&i.PasswordHash,
 		&i.CreatedAt,
 	)
@@ -69,7 +66,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, created_at FROM users
+SELECT id, email, registration_number, first_name, last_name, password_hash, created_at FROM users
 WHERE id = ?
 LIMIT 1
 `
@@ -79,25 +76,10 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, created_at FROM users
-WHERE username = ?
-LIMIT 1
-`
-
-func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
+		&i.Email,
+		&i.RegistrationNumber,
+		&i.FirstName,
+		&i.LastName,
 		&i.PasswordHash,
 		&i.CreatedAt,
 	)

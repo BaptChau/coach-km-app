@@ -7,33 +7,83 @@ package database
 
 import (
 	"context"
-	"time"
 )
 
-const deleteTrip = `-- name: DeleteTrip :exec
+const createTrip = `-- name: CreateTrip :one
+INSERT INTO trips (user_id, vehicle_id, client_id, date, origin, destination, purpose, distance_km, round_trip)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (user_id, client_id) DO NOTHING
+RETURNING id, user_id, vehicle_id, client_id, date, origin, destination, purpose, distance_km, round_trip, created_at
+`
+
+type CreateTripParams struct {
+	UserID      int64   `json:"userId"`
+	VehicleID   int64   `json:"vehicleId"`
+	ClientID    *string `json:"clientId"`
+	Date        string  `json:"date"`
+	Origin      string  `json:"origin"`
+	Destination string  `json:"destination"`
+	Purpose     string  `json:"purpose"`
+	DistanceKm  float64 `json:"distanceKm"`
+	RoundTrip   bool    `json:"roundTrip"`
+}
+
+func (q *Queries) CreateTrip(ctx context.Context, arg CreateTripParams) (Trip, error) {
+	row := q.db.QueryRowContext(ctx, createTrip,
+		arg.UserID,
+		arg.VehicleID,
+		arg.ClientID,
+		arg.Date,
+		arg.Origin,
+		arg.Destination,
+		arg.Purpose,
+		arg.DistanceKm,
+		arg.RoundTrip,
+	)
+	var i Trip
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.VehicleID,
+		&i.ClientID,
+		&i.Date,
+		&i.Origin,
+		&i.Destination,
+		&i.Purpose,
+		&i.DistanceKm,
+		&i.RoundTrip,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteTrip = `-- name: DeleteTrip :execrows
 DELETE FROM trips
 WHERE id = ? AND user_id = ?
 `
 
 type DeleteTripParams struct {
 	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
+	UserID int64 `json:"userId"`
 }
 
-func (q *Queries) DeleteTrip(ctx context.Context, arg DeleteTripParams) error {
-	_, err := q.db.ExecContext(ctx, deleteTrip, arg.ID, arg.UserID)
-	return err
+func (q *Queries) DeleteTrip(ctx context.Context, arg DeleteTripParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteTrip, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const getTrip = `-- name: GetTrip :one
-SELECT id, user_id, date, origin, destination, distance_km, created_at FROM trips
+SELECT id, user_id, vehicle_id, client_id, date, origin, destination, purpose, distance_km, round_trip, created_at FROM trips
 WHERE id = ? AND user_id = ?
 LIMIT 1
 `
 
 type GetTripParams struct {
 	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
+	UserID int64 `json:"userId"`
 }
 
 func (q *Queries) GetTrip(ctx context.Context, arg GetTripParams) (Trip, error) {
@@ -42,23 +92,73 @@ func (q *Queries) GetTrip(ctx context.Context, arg GetTripParams) (Trip, error) 
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
+		&i.VehicleID,
+		&i.ClientID,
 		&i.Date,
 		&i.Origin,
 		&i.Destination,
+		&i.Purpose,
 		&i.DistanceKm,
+		&i.RoundTrip,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
-const listTripsByUser = `-- name: ListTripsByUser :many
-SELECT id, user_id, date, origin, destination, distance_km, created_at FROM trips
-WHERE user_id = ?
-ORDER BY date DESC, id DESC
+const getTripByClientID = `-- name: GetTripByClientID :one
+SELECT id, user_id, vehicle_id, client_id, date, origin, destination, purpose, distance_km, round_trip, created_at FROM trips
+WHERE user_id = ? AND client_id = ?
+LIMIT 1
 `
 
-func (q *Queries) ListTripsByUser(ctx context.Context, userID int64) ([]Trip, error) {
-	rows, err := q.db.QueryContext(ctx, listTripsByUser, userID)
+type GetTripByClientIDParams struct {
+	UserID   int64   `json:"userId"`
+	ClientID *string `json:"clientId"`
+}
+
+func (q *Queries) GetTripByClientID(ctx context.Context, arg GetTripByClientIDParams) (Trip, error) {
+	row := q.db.QueryRowContext(ctx, getTripByClientID, arg.UserID, arg.ClientID)
+	var i Trip
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.VehicleID,
+		&i.ClientID,
+		&i.Date,
+		&i.Origin,
+		&i.Destination,
+		&i.Purpose,
+		&i.DistanceKm,
+		&i.RoundTrip,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listTripsByUserYear = `-- name: ListTripsByUserYear :many
+SELECT id, user_id, vehicle_id, client_id, date, origin, destination, purpose, distance_km, round_trip, created_at FROM trips
+WHERE user_id = ?1
+  AND date >= ?2 AND date < ?3
+ORDER BY date DESC, id DESC
+LIMIT ?5 OFFSET ?4
+`
+
+type ListTripsByUserYearParams struct {
+	UserID   int64  `json:"userId"`
+	FromDate string `json:"fromDate"`
+	ToDate   string `json:"toDate"`
+	Off      int64  `json:"off"`
+	Lim      int64  `json:"lim"`
+}
+
+func (q *Queries) ListTripsByUserYear(ctx context.Context, arg ListTripsByUserYearParams) ([]Trip, error) {
+	rows, err := q.db.QueryContext(ctx, listTripsByUserYear,
+		arg.UserID,
+		arg.FromDate,
+		arg.ToDate,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -69,10 +169,14 @@ func (q *Queries) ListTripsByUser(ctx context.Context, userID int64) ([]Trip, er
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
+			&i.VehicleID,
+			&i.ClientID,
 			&i.Date,
 			&i.Origin,
 			&i.Destination,
+			&i.Purpose,
 			&i.DistanceKm,
+			&i.RoundTrip,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -88,28 +192,80 @@ func (q *Queries) ListTripsByUser(ctx context.Context, userID int64) ([]Trip, er
 	return items, nil
 }
 
+const sumKmByMonthVehicle = `-- name: SumKmByMonthVehicle :many
+SELECT
+    CAST(substr(date, 6, 2) AS INTEGER) AS month,
+    vehicle_id,
+    CAST(SUM(CASE WHEN round_trip THEN distance_km * 2 ELSE distance_km END) AS REAL) AS km
+FROM trips
+WHERE user_id = ?1
+  AND date >= ?2 AND date < ?3
+GROUP BY month, vehicle_id
+`
+
+type SumKmByMonthVehicleParams struct {
+	UserID   int64  `json:"userId"`
+	FromDate string `json:"fromDate"`
+	ToDate   string `json:"toDate"`
+}
+
+type SumKmByMonthVehicleRow struct {
+	Month     int64   `json:"month"`
+	VehicleID int64   `json:"vehicleId"`
+	Km        float64 `json:"km"`
+}
+
+func (q *Queries) SumKmByMonthVehicle(ctx context.Context, arg SumKmByMonthVehicleParams) ([]SumKmByMonthVehicleRow, error) {
+	rows, err := q.db.QueryContext(ctx, sumKmByMonthVehicle, arg.UserID, arg.FromDate, arg.ToDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SumKmByMonthVehicleRow
+	for rows.Next() {
+		var i SumKmByMonthVehicleRow
+		if err := rows.Scan(&i.Month, &i.VehicleID, &i.Km); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateTrip = `-- name: UpdateTrip :one
 UPDATE trips
-SET date = ?, origin = ?, destination = ?, distance_km = ?
+SET vehicle_id = ?, date = ?, origin = ?, destination = ?, purpose = ?, distance_km = ?, round_trip = ?
 WHERE id = ? AND user_id = ?
-RETURNING id, user_id, date, origin, destination, distance_km, created_at
+RETURNING id, user_id, vehicle_id, client_id, date, origin, destination, purpose, distance_km, round_trip, created_at
 `
 
 type UpdateTripParams struct {
-	Date        time.Time `json:"date"`
-	Origin      string    `json:"origin"`
-	Destination string    `json:"destination"`
-	DistanceKm  float64   `json:"distance_km"`
-	ID          int64     `json:"id"`
-	UserID      int64     `json:"user_id"`
+	VehicleID   int64   `json:"vehicleId"`
+	Date        string  `json:"date"`
+	Origin      string  `json:"origin"`
+	Destination string  `json:"destination"`
+	Purpose     string  `json:"purpose"`
+	DistanceKm  float64 `json:"distanceKm"`
+	RoundTrip   bool    `json:"roundTrip"`
+	ID          int64   `json:"id"`
+	UserID      int64   `json:"userId"`
 }
 
 func (q *Queries) UpdateTrip(ctx context.Context, arg UpdateTripParams) (Trip, error) {
 	row := q.db.QueryRowContext(ctx, updateTrip,
+		arg.VehicleID,
 		arg.Date,
 		arg.Origin,
 		arg.Destination,
+		arg.Purpose,
 		arg.DistanceKm,
+		arg.RoundTrip,
 		arg.ID,
 		arg.UserID,
 	)
@@ -117,10 +273,14 @@ func (q *Queries) UpdateTrip(ctx context.Context, arg UpdateTripParams) (Trip, e
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
+		&i.VehicleID,
+		&i.ClientID,
 		&i.Date,
 		&i.Origin,
 		&i.Destination,
+		&i.Purpose,
 		&i.DistanceKm,
+		&i.RoundTrip,
 		&i.CreatedAt,
 	)
 	return i, err

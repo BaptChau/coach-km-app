@@ -8,19 +8,40 @@ import (
 	"time"
 )
 
+type Rate struct {
+	Year          int64  `json:"year"`
+	VehicleType   string `json:"vehicleType"`
+	MilliEurPerKm int64  `json:"milliEurPerKm"`
+}
+
 type Trip struct {
 	ID          int64     `json:"id"`
-	UserID      int64     `json:"user_id"`
-	Date        time.Time `json:"date"`
+	UserID      int64     `json:"userId"`
+	VehicleID   int64     `json:"vehicleId"`
+	ClientID    *string   `json:"clientId"`
+	Date        string    `json:"date"`
 	Origin      string    `json:"origin"`
 	Destination string    `json:"destination"`
-	DistanceKm  float64   `json:"distance_km"`
-	CreatedAt   time.Time `json:"created_at"`
+	Purpose     string    `json:"purpose"`
+	DistanceKm  float64   `json:"distanceKm"`
+	RoundTrip   bool      `json:"roundTrip"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 type User struct {
-	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"password_hash"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                 int64     `json:"id"`
+	Email              string    `json:"email"`
+	RegistrationNumber string    `json:"registrationNumber"`
+	FirstName          string    `json:"firstName"`
+	LastName           string    `json:"lastName"`
+	PasswordHash       string    `json:"passwordHash"`
+	CreatedAt          time.Time `json:"createdAt"`
+}
+
+type Vehicle struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"userId"`
+	Label     string    `json:"label"`
+	Type      string    `json:"type"`
+	CreatedAt time.Time `json:"createdAt"`
 }
